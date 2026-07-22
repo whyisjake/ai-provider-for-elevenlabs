@@ -6,7 +6,7 @@
  * Description: ElevenLabs provider for the WordPress AI API.
  * Requires at least: 6.9
  * Requires PHP: 7.4
- * Version: 0.1.2
+ * Version: 0.2.0
  * Author: Lauri Saarni
  * Author URI: https://profiles.wordpress.org/laurisaarni/
  * License: GPL-2.0-or-later
@@ -83,6 +83,14 @@ function register_provider(): void
         $apiKey = (string) constant('ELEVENLABS_API_KEY');
     }
     if ($apiKey === false || $apiKey === '') {
+        // WordPress 7.0+ core Connectors option (Settings > Connectors).
+        $connectorsKey = get_option('connectors_ai_elevenlabs_api_key', '');
+        if (is_string($connectorsKey) && $connectorsKey !== '') {
+            $apiKey = $connectorsKey;
+        }
+    }
+    if ($apiKey === false || $apiKey === '') {
+        // Legacy wp-ai-client credentials option (pre-7.0).
         $option = get_option('wp_ai_client_provider_credentials');
         if ($option !== false && isset($option['elevenlabs']) && $option['elevenlabs'] !== '') {
             $apiKey = $option['elevenlabs'];
@@ -99,12 +107,14 @@ function register_provider(): void
 add_action('init', __NAMESPACE__ . '\\register_provider', 5);
 
 /**
- * Re-applies ElevenLabs-specific authentication after AI_Client::init().
+ * Re-applies ElevenLabs-specific authentication after generic credential wiring.
  *
- * The API_Credentials_Manager (running at init priority 10) overwrites all
- * provider auth with the generic ApiKeyRequestAuthentication (Authorization: Bearer),
- * but ElevenLabs requires the xi-api-key header. This hook runs after that to
- * restore the correct authentication class.
+ * Both wp-ai-client's API_Credentials_Manager (init priority 10, pre-7.0)
+ * and WordPress 7.0+ core's _wp_connectors_pass_default_keys_to_ai_client()
+ * (init priority 20) overwrite provider auth with the generic
+ * ApiKeyRequestAuthentication (Authorization: Bearer), but ElevenLabs
+ * requires the xi-api-key header. This hook runs after both to restore the
+ * correct authentication class.
  *
  * @since 0.1.1
  */
@@ -138,4 +148,7 @@ function restore_elevenlabs_authentication(): void
     );
 }
 
-add_action('init', __NAMESPACE__ . '\\restore_elevenlabs_authentication', 11);
+// Priority 21: after wp-ai-client's API_Credentials_Manager (init 10) on
+// pre-7.0, and after core's _wp_connectors_pass_default_keys_to_ai_client
+// (init 20) on WordPress 7.0+.
+add_action('init', __NAMESPACE__ . '\\restore_elevenlabs_authentication', 21);

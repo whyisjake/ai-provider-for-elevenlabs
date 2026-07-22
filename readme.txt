@@ -2,8 +2,8 @@
 Contributors: laurisaarni
 Tags: ai, elevenlabs, text-to-speech, tts, sound-effects
 Requires at least: 6.9
-Tested up to: 6.9
-Stable tag: 0.1.2
+Tested up to: 7.0
+Stable tag: 0.2.0
 Requires PHP: 7.4
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -60,6 +60,11 @@ Set the `outputSpeechVoice` option in your `ModelConfig` to the voice ID. You ca
 The default output format is MP3 (mp3_44100_128). Other supported formats include PCM, ulaw, Opus, and AAC at various sample rates and bitrates.
 
 == Changelog ==
+
+= 0.2.0 =
+* WordPress 7.0 compatibility: read the API key from the core Connectors option (`connectors_ai_elevenlabs_api_key`, Settings > Connectors)
+* WordPress 7.0 compatibility: move the xi-api-key authentication restore hook to init priority 21, after core's Connectors credential pass (init 20) which overwrites provider auth with generic Bearer authentication
+* Fix API key validation on the WordPress 7.0 Connectors page: the availability check now also considers the registry request authentication and the Connectors/legacy credential options, instead of only the ELEVENLABS_API_KEY environment variable or constant
 
 = 0.1.2 =
 * Fix issue if API key not yet set in options table
