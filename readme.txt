@@ -104,7 +104,9 @@ The default output format is MP3 (mp3_44100_128). Other supported formats includ
 * Narrate post-length text in the background. Work is queued as small jobs of about a thousand characters each, so no single request has to outlive its PHP time limit, and the finished audio is added to the media library
 * Add `ai_provider_elevenlabs_narration_complete` and `ai_provider_elevenlabs_narration_failed` actions, and a progress reading for a job in flight
 * Size chunks from measurement rather than assumption. Synthesis runs at roughly 92 characters per second, so a 4,000-character chunk takes 42 seconds and cannot survive a default 30-second limit. The default is 1,000 characters, near eleven seconds
-* Retry a chunk up to three times before failing the job. WordPress deletes a scheduled event before running it, so nothing in core re-drives work whose process died; expiring claims handle it here
+* Retry a chunk up to three times before failing the job, and sweep hourly for jobs left with work to do but nothing scheduled to do it. WordPress deletes a scheduled event before running it, so a process killed mid-chunk takes the only pending event with it; the sweeper is what recovers those
+* Drop the stored post text once a job finishes, so narrating routinely does not accumulate every post in the options table
+* Fail a job whose audio cannot be added to the media library, and keep the narrated audio on disk rather than deleting work already paid for
 * Let a site substitute its own background runner through the `ai_provider_elevenlabs_narration_queue` filter, and adjust chunk size through `ai_provider_elevenlabs_narration_chunk_size`
 * Store jobs one option per job with autoload disabled, and keep chunk audio on disk rather than in the database
 * Fix a fatal error in installs without Composer: `TextChunker` was never loaded, so long-form narration failed with a missing class. Added a test that fails when any class is left unregistered

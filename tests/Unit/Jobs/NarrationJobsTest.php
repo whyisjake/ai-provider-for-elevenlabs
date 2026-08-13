@@ -192,6 +192,80 @@ class NarrationJobsTest extends TestCase
         $this->addToAssertionCount(1);
     }
 
+    // ------------------------------------------------------------------
+    // Sweeping stalled jobs
+    // ------------------------------------------------------------------
+
+    /**
+     * The failure this exists for: a process killed mid-chunk takes its event
+     * with it, because WordPress unschedules before running. Expiring claims
+     * make the chunk reclaimable, but nothing reclaims it on its own.
+     */
+    public function testSweepingRedrivesAJobThatLostItsScheduledEvent(): void
+    {
+        $jobs = $this->createJobs();
+        $jobId = $jobs->enqueue(str_repeat('a', 9000), ['chunk_size' => 4000]);
+
+        // The event vanishes, as it does when the process handling it dies.
+        $this->queue->cancelChunk($jobId, 0);
+        $this->assertFalse($this->queue->isChunkPending($jobId, 0));
+
+        $this->assertSame(1, $jobs->sweep());
+        $this->assertTrue($this->queue->isChunkPending($jobId, 0));
+    }
+
+    public function testSweepingLeavesAJobThatIsMerelyWaitingItsTurn(): void
+    {
+        $jobs = $this->createJobs();
+        $jobs->enqueue(str_repeat('a', 9000), ['chunk_size' => 4000]);
+
+        $this->assertSame(0, $jobs->sweep(), 'A scheduled job was rescheduled.');
+    }
+
+    public function testSweepingIgnoresFinishedJobs(): void
+    {
+        $jobs = $this->createJobs();
+        $jobId = $jobs->enqueue('short text');
+
+        $this->store->completeJob($jobId, 7);
+        $this->queue->cancelChunk($jobId, 0);
+
+        $this->assertSame(0, $jobs->sweep());
+        $this->assertFalse($this->queue->isChunkPending($jobId, 0));
+    }
+
+    public function testSweepingIgnoresCancelledJobs(): void
+    {
+        $jobs = $this->createJobs();
+        $jobId = $jobs->enqueue('short text');
+
+        $jobs->cancel($jobId);
+
+        $this->assertSame(0, $jobs->sweep());
+        $this->assertFalse($this->queue->isChunkPending($jobId, 0));
+    }
+
+    /**
+     * The record is kept so progress stays readable, but the text is the bulk
+     * of it. Left in place, a site that narrates routinely accumulates every
+     * post it has ever narrated in the options table.
+     */
+    public function testAFinishedJobNoLongerHoldsThePostText(): void
+    {
+        $jobs = $this->createJobs();
+        $jobId = $jobs->enqueue('the text of a whole post');
+
+        $this->store->completeJob($jobId, 7);
+
+        $record = $this->store->get($jobId);
+        $this->assertNotNull($record);
+        $this->assertSame('', $record['chunks'][0]['text']);
+
+        $progress = $jobs->progress($jobId);
+        $this->assertNotNull($progress);
+        $this->assertSame(7, $progress['attachment_id']);
+    }
+
     public function testCancellingClearsEveryChunkNotJustTheScheduledOne(): void
     {
         $jobs = $this->createJobs();

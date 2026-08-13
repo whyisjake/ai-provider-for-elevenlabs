@@ -257,9 +257,12 @@ knowing before you rely on it:
   system cron, a queue on a quiet site only advances when somebody visits. A job
   is not lost, but it can sit unfinished for a long time.
 - **It does not retry.** WordPress deletes a scheduled event before running it,
-  so nothing in core will re-drive work whose process died. This plugin handles
-  that itself with expiring claims, retrying a chunk up to three times before
-  failing the job.
+  so nothing in core re-drives work whose process died — the event is gone with
+  it. This plugin handles that itself: a chunk is claimed with an expiry, failed
+  chunks are released and retried up to three times, and an hourly sweeper picks
+  up any job left with work to do but nothing scheduled to do it. That sweeper
+  is what covers a request killed outright by a fatal, a timeout, or the OOM
+  killer, where nothing survives to reschedule anything.
 - **It does not extend the time limit.** A cron callback is an ordinary PHP
   request. That is why the unit of work is one chunk rather than one post.
 

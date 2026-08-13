@@ -71,6 +71,19 @@ class NarrationJobStore
     public const OPTION_PREFIX = 'ai_provider_elevenlabs_narration_job_';
 
     /**
+     * Option holding the ids of jobs that have not finished.
+     *
+     * A small list, kept so unfinished work can be found again. Without it
+     * there is no way to enumerate jobs short of scanning the options table,
+     * and a job whose process was killed would have nothing to look for it.
+     *
+     * @since n.e.x.t
+     *
+     * @var string
+     */
+    public const ACTIVE_OPTION = 'ai_provider_elevenlabs_narration_active';
+
+    /**
      * Job has been created but no chunk has completed yet.
      *
      * @since n.e.x.t
@@ -170,7 +183,57 @@ class NarrationJobStore
             'chunks'        => $chunkRecords,
         ]);
 
+        $this->setActiveJobIds(array_merge($this->activeJobIds(), [$jobId]));
+
         return $jobId;
+    }
+
+    /**
+     * Returns the ids of jobs that have not reached a terminal status.
+     *
+     * @since n.e.x.t
+     *
+     * @return list<string> The job ids.
+     */
+    public function activeJobIds(): array
+    {
+        $raw = function_exists('get_option')
+            ? get_option(self::ACTIVE_OPTION, [])
+            : ($this->memory[self::ACTIVE_OPTION] ?? []);
+
+        if (!is_array($raw)) {
+            return [];
+        }
+
+        $ids = [];
+        foreach ($raw as $id) {
+            if (is_string($id) && $id !== '') {
+                $ids[] = $id;
+            }
+        }
+
+        return $ids;
+    }
+
+    /**
+     * Replaces the list of unfinished jobs.
+     *
+     * @since n.e.x.t
+     *
+     * @param list<string> $ids The job ids.
+     * @return void
+     */
+    protected function setActiveJobIds(array $ids): void
+    {
+        $unique = array_values(array_unique($ids));
+
+        if (function_exists('update_option')) {
+            update_option(self::ACTIVE_OPTION, $unique, false);
+
+            return;
+        }
+
+        $this->memory[self::ACTIVE_OPTION] = $unique;
     }
 
     /**
@@ -298,6 +361,34 @@ class NarrationJobStore
         if ($record['status'] === self::STATUS_PENDING) {
             $record['status'] = self::STATUS_RUNNING;
         }
+
+        $this->writeRecord($jobId, $this->touch($record));
+    }
+
+    /**
+     * Releases a chunk's claim without marking it done.
+     *
+     * Called when a chunk fails and will be retried. Without this the claim
+     * outlives the failure, and the retry -- which runs in a different process
+     * with a different owner -- is refused by its own predecessor until the
+     * claim expires. The job would sit with no pending work and no error.
+     *
+     * @since n.e.x.t
+     *
+     * @param string $jobId The job id.
+     * @param int    $index The chunk index.
+     * @return void
+     */
+    public function releaseChunk(string $jobId, int $index): void
+    {
+        $record = $this->readRecord($jobId);
+
+        if ($record === null || !isset($record['chunks'][$index])) {
+            return;
+        }
+
+        $record['chunks'][$index]['claim'] = null;
+        $record['chunks'][$index]['claim_expires'] = null;
 
         $this->writeRecord($jobId, $this->touch($record));
     }
@@ -515,7 +606,25 @@ class NarrationJobStore
         $record['error'] = $error;
         $record['attachment_id'] = $attachmentId;
 
+        /*
+         * Drop the chunk text once a job is over. The record is kept so progress
+         * and errors stay readable, but the text is the bulk of it -- a whole
+         * post per job -- and nothing reads it again. Left in place, a site that
+         * narrates routinely accumulates every post it has ever narrated in the
+         * options table.
+         */
+        foreach (array_keys($record['chunks']) as $index) {
+            $record['chunks'][$index]['text'] = '';
+        }
+
         $this->writeRecord($jobId, $this->touch($record));
+
+        $this->setActiveJobIds(
+            array_values(array_filter(
+                $this->activeJobIds(),
+                static fn(string $id): bool => $id !== $jobId
+            ))
+        );
     }
 
     /**

@@ -183,7 +183,58 @@ function run_narration_chunk($job_id, $chunk_index): void
         return;
     }
 
+    /*
+     * Classes are loaded by register_provider(), which returns early when the
+     * AI Client is missing. Queued events outlive a deactivation of that
+     * plugin, so without this the callback fatals on an undefined class.
+     */
+    if (!class_exists(AiClient::class)) {
+        return;
+    }
+
+    load_classes();
+
     (new NarrationJobs())->runChunk($job_id, (int) $chunk_index);
 }
 
 add_action(WpCronNarrationQueue::HOOK, __NAMESPACE__ . '\\run_narration_chunk', 10, 2);
+
+/**
+ * Re-drives narration jobs that have work left but nothing scheduled.
+ *
+ * A process killed mid-chunk takes its event with it, because WordPress
+ * unschedules an event before running it. The store's claims make the chunk
+ * reclaimable; this is what actually reclaims it.
+ *
+ * @since n.e.x.t
+ *
+ * @return void
+ */
+function sweep_narration_jobs(): void
+{
+    if (!class_exists(AiClient::class)) {
+        return;
+    }
+
+    load_classes();
+
+    (new NarrationJobs())->sweep();
+}
+
+add_action(NarrationJobs::SWEEP_HOOK, __NAMESPACE__ . '\\sweep_narration_jobs');
+
+/**
+ * Ensures the narration sweeper is scheduled.
+ *
+ * @since n.e.x.t
+ *
+ * @return void
+ */
+function schedule_narration_sweep(): void
+{
+    if (wp_next_scheduled(NarrationJobs::SWEEP_HOOK) === false) {
+        wp_schedule_event(time() + HOUR_IN_SECONDS, 'hourly', NarrationJobs::SWEEP_HOOK);
+    }
+}
+
+add_action('init', __NAMESPACE__ . '\\schedule_narration_sweep', 22);

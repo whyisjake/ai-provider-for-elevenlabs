@@ -166,7 +166,9 @@ class NarrationJobRunner
         try {
             $path = $this->writeChunkAudio($jobId, $chunkIndex, $bytes);
         } catch (Throwable $e) {
-            $this->fail($jobId, $e->getMessage());
+            // A full disk is often momentary, and the credits are already
+            // spent, so this gets the same retries as a failed request.
+            $this->handleChunkFailure($jobId, $chunkIndex, $e->getMessage());
 
             return;
         }
@@ -256,6 +258,14 @@ class NarrationJobRunner
             return;
         }
 
+        /*
+         * Release before rescheduling. The retry runs in a different process
+         * with a different owner, and an unreleased claim outlives the failure
+         * by CLAIM_TTL -- so the retry would be refused by its own dead
+         * predecessor, leaving the job with no pending work and no error.
+         */
+        $this->store->releaseChunk($jobId, $chunkIndex);
+
         $this->queue->scheduleChunk($jobId, $chunkIndex, self::RETRY_DELAY);
     }
 
@@ -272,6 +282,15 @@ class NarrationJobRunner
         $record = $this->store->get($jobId);
 
         if ($record === null) {
+            return;
+        }
+
+        /*
+         * Re-read rather than trusting the check at the top of run(). A caller
+         * may have cancelled while this chunk was in flight, and delivering an
+         * attachment the user asked not to have is worse than doing nothing.
+         */
+        if (in_array($record['status'], $this->terminalStatuses(), true)) {
             return;
         }
 
@@ -305,10 +324,41 @@ class NarrationJobRunner
                 return;
             }
 
-            file_put_contents($target, $chunkBytes, FILE_APPEND);
+            if (file_put_contents($target, $chunkBytes, FILE_APPEND) === false) {
+                // A truncated file still plays. Failing is the only way the
+                // caller learns the narration is not what it claims to be.
+                $this->fail($jobId, sprintf('Ran out of room joining the narration at "%s".', $target));
+
+                return;
+            }
         }
 
         $attachmentId = $this->createAttachment($target, $record);
+
+        /*
+         * The directory below holds the only copy of this audio. Removing it
+         * when delivery failed would destroy work already paid for and report
+         * success while doing it, so a failed attachment fails the job -- and
+         * fail() is what cleans up.
+         */
+        if ($attachmentId <= 0) {
+            /*
+             * Keep the audio. It is synthesised, paid for, and sitting on disk;
+             * throwing it away because the last step failed turns a recoverable
+             * problem into a wasted bill.
+             */
+            $this->fail(
+                $jobId,
+                sprintf(
+                    'The narration was synthesised but could not be added to the media library. '
+                    . 'The audio has been left at "%s".',
+                    $target
+                ),
+                true
+            );
+
+            return;
+        }
 
         // Only once the artefact is safely elsewhere. Never before.
         $this->store->completeJob($jobId, $attachmentId);
@@ -322,14 +372,18 @@ class NarrationJobRunner
      *
      * @since n.e.x.t
      *
-     * @param string $jobId  The job id.
-     * @param string $reason The failure reason.
+     * @param string $jobId         The job id.
+     * @param string $reason        The failure reason.
+     * @param bool   $preserveAudio Keep whatever was narrated, for recovery.
      * @return void
      */
-    protected function fail(string $jobId, string $reason): void
+    protected function fail(string $jobId, string $reason, bool $preserveAudio = false): void
     {
         $this->store->failJob($jobId, $reason);
-        $this->store->removeJobDirectory($jobId);
+
+        if (!$preserveAudio) {
+            $this->store->removeJobDirectory($jobId);
+        }
 
         $this->fire(self::HOOK_FAILED, $jobId, $reason);
     }

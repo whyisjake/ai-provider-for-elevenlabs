@@ -211,8 +211,32 @@ class AsyncNarrationIntegrationTest extends TestCase
 
         $jobId = $jobs->enqueue('A short line of narration.', ['voice' => self::VOICE_ID]);
 
-        $jobs->runChunk($jobId, 0);
+        /*
+         * Delivery has to succeed for cleanup to be correct: there is no media
+         * library out here, and a job whose audio was never delivered keeps it
+         * on disk deliberately, so it can be recovered rather than re-bought.
+         */
+        $runner = new class ($store, $queue, static fn(array $record) => $registry->getProviderModel(
+            'elevenlabs',
+            $record['model_id'],
+            ModelConfig::fromArray(['outputSpeechVoice' => $record['voice_id']])
+        )) extends NarrationJobRunner {
+            protected function createAttachment(string $path, array $record): int
+            {
+                return 1;
+            }
 
+            protected function fire(string $hook, string $jobId, $context): void
+            {
+            }
+        };
+
+        $runner->run($jobId, 0);
+
+        $this->assertSame(
+            NarrationJobStore::STATUS_COMPLETE,
+            ($jobs->progress($jobId) ?? [])['status'] ?? null
+        );
         $this->assertDirectoryDoesNotExist($store->jobDirectory($jobId));
     }
 }

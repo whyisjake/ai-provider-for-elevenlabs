@@ -39,6 +39,15 @@ class NarrationJobs
     public const FILTER_CHUNK_SIZE = 'ai_provider_elevenlabs_narration_chunk_size';
 
     /**
+     * Recurring action that re-drives stalled jobs.
+     *
+     * @since n.e.x.t
+     *
+     * @var string
+     */
+    public const SWEEP_HOOK = 'ai_provider_elevenlabs_narration_sweep';
+
+    /**
      * Characters per chunk by default.
      *
      * Measured against the live API rather than reasoned about. Synthesis is
@@ -188,6 +197,42 @@ class NarrationJobs
 
         $this->store->cancelJob($jobId);
         $this->store->removeJobDirectory($jobId);
+    }
+
+    /**
+     * Re-drives jobs that have work left but nothing scheduled to do it.
+     *
+     * The expiring claims in the store make a chunk *reclaimable*, but nothing
+     * reclaims it on its own: WordPress deletes an event before running it, so
+     * a process killed mid-chunk -- a fatal, a timeout, an OOM -- takes the
+     * only pending event with it. Without this the job would sit in "running"
+     * for good, which is precisely the failure the whole mechanism exists to
+     * prevent.
+     *
+     * Cheap by design: it only schedules work, and scheduling is idempotent per
+     * chunk, so a job that is merely waiting its turn is left alone.
+     *
+     * @since n.e.x.t
+     *
+     * @return int How many jobs were re-driven.
+     */
+    public function sweep(): int
+    {
+        $revived = 0;
+
+        foreach ($this->store->activeJobIds() as $jobId) {
+            $next = $this->store->nextPendingChunk($jobId);
+
+            if ($next === null || $this->queue->isChunkPending($jobId, $next)) {
+                continue;
+            }
+
+            if ($this->queue->scheduleChunk($jobId, $next)) {
+                $revived++;
+            }
+        }
+
+        return $revived;
     }
 
     /**

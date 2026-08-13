@@ -265,23 +265,61 @@ class NarrationJobRunnerTest extends TestCase
         $this->assertSame(NarrationJobStore::STATUS_RUNNING, $progress['status']);
     }
 
+    /**
+     * A fresh runner per attempt, because that is what actually happens: each
+     * retry is a separate cron fire in a separate PHP process with its own
+     * claim owner. Reusing one runner hides the case where a chunk's own dead
+     * predecessor refuses its retry.
+     */
     public function testAChunkThatKeepsFailingEventuallyFailsTheJob(): void
     {
         $jobId = $this->store->create(['one'], $this->meta());
-        $runner = $this->createRunner(static function (): void {
+        $failing = static function (): void {
             throw new RuntimeException('the API said no');
-        });
+        };
+
+        $last = null;
 
         for ($attempt = 0; $attempt < NarrationJobRunner::MAX_ATTEMPTS; $attempt++) {
             $this->queue->cancelChunk($jobId, 0);
-            $runner->run($jobId, 0);
+            $last = $this->createRunner($failing);
+            $last->run($jobId, 0);
         }
+
+        $this->assertSame(NarrationJobRunner::MAX_ATTEMPTS, count($this->narrated));
 
         $progress = $this->store->progress($jobId);
         $this->assertNotNull($progress);
         $this->assertSame(NarrationJobStore::STATUS_FAILED, $progress['status']);
         $this->assertStringContainsString('the API said no', (string) $progress['error']);
-        $this->assertSame([NarrationJobRunner::HOOK_FAILED], $runner->firedHooks());
+        $this->assertNotNull($last);
+        $this->assertSame([NarrationJobRunner::HOOK_FAILED], $last->firedHooks());
+    }
+
+    /**
+     * The regression behind the above. A failed chunk left its claim in place,
+     * so the retry -- a different process, a different owner -- was refused by
+     * its own dead predecessor for the remaining five minutes of the claim.
+     * The job sat in "running" with no pending work and no error, forever.
+     */
+    public function testARetryIsNotBlockedByTheClaimOfTheAttemptThatFailed(): void
+    {
+        $jobId = $this->store->create(['one'], $this->meta());
+        $failing = static function (): void {
+            throw new RuntimeException('transient');
+        };
+
+        $this->createRunner($failing)->run($jobId, 0);
+
+        $this->assertTrue($this->queue->isChunkPending($jobId, 0), 'The retry was never scheduled.');
+
+        // A different process picks the retry up.
+        $this->queue->cancelChunk($jobId, 0);
+        $second = $this->createRunner();
+        $second->run($jobId, 0);
+
+        $this->assertSame(['one', 'one'], $this->narrated, 'The retry never ran.');
+        $this->assertSame('[one]', $second->joined);
     }
 
     public function testAFailedJobCleansUpItsDirectory(): void
@@ -308,6 +346,52 @@ class NarrationJobRunnerTest extends TestCase
         $runner->run($jobId, 0);
 
         $this->assertSame([], $this->narrated);
+    }
+
+    /**
+     * Delivery is the last step, and the audio on disk is the only copy. A job
+     * that reports success with no attachment hands the caller nothing, and
+     * deleting the audio on the way turns it into a wasted bill.
+     */
+    public function testAFailedAttachmentFailsTheJobAndKeepsTheAudio(): void
+    {
+        $jobId = $this->store->create(['one'], $this->meta());
+        $runner = $this->createRunner();
+        $runner->attachmentId = 0;
+
+        $runner->run($jobId, 0);
+
+        $progress = $this->store->progress($jobId);
+        $this->assertNotNull($progress);
+        $this->assertSame(NarrationJobStore::STATUS_FAILED, $progress['status']);
+        $this->assertStringContainsString('media library', (string) $progress['error']);
+        $this->assertSame([NarrationJobRunner::HOOK_FAILED], $runner->firedHooks());
+
+        $this->assertDirectoryExists(
+            $this->store->jobDirectory($jobId),
+            'The narrated audio was destroyed when only delivery failed.'
+        );
+    }
+
+    /**
+     * Cancellation can land while a chunk is mid-flight. Delivering an
+     * attachment the caller asked not to have is worse than doing nothing.
+     */
+    public function testAJobCancelledMidChunkIsNotDeliveredAnyway(): void
+    {
+        $jobId = $this->store->create(['one'], $this->meta());
+
+        $runner = $this->createRunner(function () use ($jobId): void {
+            // Cancelled after the status check at the top of run().
+            $this->store->cancelJob($jobId);
+        });
+
+        $runner->run($jobId, 0);
+
+        $progress = $this->store->progress($jobId);
+        $this->assertNotNull($progress);
+        $this->assertSame(NarrationJobStore::STATUS_CANCELLED, $progress['status']);
+        $this->assertNull($runner->joined, 'A cancelled job was delivered anyway.');
     }
 
     // ------------------------------------------------------------------
