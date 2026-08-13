@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace AiProviderForElevenLabs\Models;
 
+use AiProviderForElevenLabs\Metadata\ProviderForElevenLabsModelMetadataDirectory;
 use AiProviderForElevenLabs\Provider\ProviderForElevenLabs;
+use AiProviderForElevenLabs\Text\TextChunker;
 use AiProviderForElevenLabs\Voices\VoiceDirectory;
 use Exception;
 use WordPress\AiClient\Common\Exception\InvalidArgumentException;
@@ -70,6 +72,45 @@ class ProviderForElevenLabsTextToSpeechModel extends AbstractApiBasedModel imple
     ];
 
     /**
+     * Body parameters the provider manages and a caller may not set.
+     *
+     * These carry the neighbouring text across chunk boundaries when long input
+     * is narrated in several requests. They are reserved unconditionally rather
+     * than only while chunking, so the contract does not change shape with the
+     * length of the input: allowing them for short text and rejecting them for
+     * long text would be surprising in exactly the case that is hardest to
+     * reproduce.
+     *
+     * @since n.e.x.t
+     *
+     * @var list<string>
+     */
+    private const PROVIDER_MANAGED_KEYS = [
+        'previous_text',
+        'next_text',
+    ];
+
+    /**
+     * Output format prefixes whose audio can be concatenated into one file.
+     *
+     * MP3 is frame-based and the raw formats are headerless, so joining their
+     * bytes yields a playable file. Opus is carried in an Ogg container with
+     * per-stream headers, and AAC has not been confirmed to be ADTS-framed
+     * rather than MP4-contained, so both are excluded: emitting audio that is
+     * subtly broken is worse than refusing.
+     *
+     * @since n.e.x.t
+     *
+     * @var list<string>
+     */
+    private const JOINABLE_FORMAT_PREFIXES = [
+        'mp3',
+        'pcm',
+        'ulaw',
+        'alaw',
+    ];
+
+    /**
      * Default output format when no outputMimeType is configured.
      *
      * @since 0.1.0
@@ -129,34 +170,37 @@ class ProviderForElevenLabsTextToSpeechModel extends AbstractApiBasedModel imple
         $text = $this->extractTextFromPrompt($prompt);
         $voiceId = $this->getVoiceId();
         $outputFormat = $this->resolveOutputFormat();
-        $voiceSettings = $this->resolveVoiceSettings();
 
-        $requestData = $this->applyCustomOptions([
+        $baseParams = $this->applyCustomOptions([
             'text'           => $text,
             'model_id'       => $this->metadata()->getId(),
-            'voice_settings' => $voiceSettings,
+            'voice_settings' => $this->resolveVoiceSettings(),
             'output_format'  => $outputFormat,
         ]);
 
-        $request = new Request(
-            HttpMethodEnum::POST(),
-            ProviderForElevenLabs::url('text-to-speech/' . $voiceId),
-            ['Content-Type' => 'application/json', 'Accept' => 'audio/mpeg'],
-            $requestData,
-            $this->getRequestOptions()
-        );
+        $chunks = $this->splitTextForRequests($text, $outputFormat);
+        $chunkCount = count($chunks);
 
-        $request = $this->getRequestAuthentication()->authenticateRequest($request);
-        $response = $this->getHttpTransporter()->send($request);
-        ResponseUtil::throwIfNotSuccessful($response);
+        $binaryData = '';
+        foreach ($chunks as $index => $chunk) {
+            $params = $baseParams;
+            $params['text'] = $chunk;
 
-        $binaryData = $response->getBody();
-        if ($binaryData === null || $binaryData === '') {
-            throw ResponseException::fromInvalidData(
-                $this->providerMetadata()->getName(),
-                'text-to-speech/' . $voiceId,
-                'The audio response body was empty.'
-            );
+            /*
+             * Give the model the neighbouring text so prosody carries across a
+             * seam. Only meaningful when the text was actually split, so a
+             * request that fits stays byte-identical to before.
+             */
+            if ($chunkCount > 1) {
+                if ($index > 0) {
+                    $params['previous_text'] = $chunks[$index - 1];
+                }
+                if ($index < $chunkCount - 1) {
+                    $params['next_text'] = $chunks[$index + 1];
+                }
+            }
+
+            $binaryData .= $this->sendSpeechRequest($voiceId, $params);
         }
 
         $mimeType = $this->resolveMimeTypeFromFormat($outputFormat);
@@ -253,6 +297,122 @@ class ProviderForElevenLabsTextToSpeechModel extends AbstractApiBasedModel imple
     }
 
     /**
+     * Splits the prompt text into the pieces each request will carry.
+     *
+     * Text that already fits produces a single piece, so the common case issues
+     * exactly one request with the body it always had.
+     *
+     * @since n.e.x.t
+     *
+     * @param string $text         The full prompt text.
+     * @param string $outputFormat The resolved ElevenLabs output format.
+     * @return list<string> The text for each request, in order.
+     * @throws InvalidArgumentException If splitting is required but the format cannot be joined.
+     */
+    protected function splitTextForRequests(string $text, string $outputFormat): array
+    {
+        $limit = $this->maxTextLength();
+
+        if (mb_strlen($text) <= $limit) {
+            return [$text];
+        }
+
+        /*
+         * Checked before any request is sent. Discovering mid-narration that the
+         * pieces cannot be reassembled would waste the credits already spent.
+         */
+        $this->assertFormatIsJoinable($outputFormat, $limit);
+
+        $chunks = TextChunker::split($text, $limit);
+
+        return $chunks === [] ? [$text] : $chunks;
+    }
+
+    /**
+     * Returns the character limit for the model in use.
+     *
+     * @since n.e.x.t
+     *
+     * @return int The maximum characters accepted in a single request.
+     */
+    protected function maxTextLength(): int
+    {
+        $directory = ProviderForElevenLabs::modelMetadataDirectory();
+
+        if ($directory instanceof ProviderForElevenLabsModelMetadataDirectory) {
+            return $directory->getMaxTextLength($this->metadata()->getId());
+        }
+
+        return ProviderForElevenLabsModelMetadataDirectory::DEFAULT_MAX_TEXT_LENGTH;
+    }
+
+    /**
+     * Fails when audio in the given format could not be reassembled.
+     *
+     * @since n.e.x.t
+     *
+     * @param string $outputFormat The resolved ElevenLabs output format.
+     * @param int    $limit        The character limit that forced the split.
+     * @return void
+     * @throws InvalidArgumentException If the format cannot be safely joined.
+     */
+    protected function assertFormatIsJoinable(string $outputFormat, int $limit): void
+    {
+        $prefix = explode('_', $outputFormat)[0];
+
+        if (in_array($prefix, self::JOINABLE_FORMAT_PREFIXES, true)) {
+            return;
+        }
+
+        throw new InvalidArgumentException(
+            sprintf(
+                'Text longer than %d characters is narrated in several requests, but "%s" audio '
+                . 'cannot be joined back into a single file. Choose an MP3 or PCM output format, '
+                . 'or shorten the text.',
+                $limit,
+                $outputFormat
+            )
+        );
+    }
+
+    /**
+     * Sends one speech request and returns its audio bytes.
+     *
+     * @since n.e.x.t
+     *
+     * @param string               $voiceId The voice to synthesise with.
+     * @param array<string, mixed> $params  The request body.
+     * @return string The raw audio bytes.
+     * @throws ResponseException If the response carries no audio.
+     */
+    protected function sendSpeechRequest(string $voiceId, array $params): string
+    {
+        $request = new Request(
+            HttpMethodEnum::POST(),
+            ProviderForElevenLabs::url('text-to-speech/' . $voiceId),
+            ['Content-Type' => 'application/json', 'Accept' => 'audio/mpeg'],
+            $params,
+            $this->getRequestOptions()
+        );
+
+        $request = $this->getRequestAuthentication()->authenticateRequest($request);
+        $response = $this->getHttpTransporter()->send($request);
+
+        ResponseUtil::throwIfNotSuccessful($response);
+
+        $binaryData = $response->getBody();
+        if ($binaryData === null || $binaryData === '') {
+            throw ResponseException::fromInvalidData(
+                $this->providerMetadata()->getName(),
+                'text-to-speech/' . $voiceId,
+                'The audio response body was empty.'
+            );
+        }
+
+        return $binaryData;
+    }
+
+    /**
      * Gets a voice directory backed by this model's transport and credentials.
      *
      * Built from the model's own transporter and authentication rather than the
@@ -344,6 +504,16 @@ class ProviderForElevenLabsTextToSpeechModel extends AbstractApiBasedModel imple
         foreach ($this->getConfig()->getCustomOptions() as $key => $value) {
             if (in_array($key, self::VOICE_SETTING_KEYS, true) || $key === 'output_format') {
                 continue;
+            }
+
+            if (in_array($key, self::PROVIDER_MANAGED_KEYS, true)) {
+                throw new InvalidArgumentException(
+                    sprintf(
+                        'The custom option "%s" is managed by the provider, which sets it when long '
+                        . 'text is narrated across several requests.',
+                        $key
+                    )
+                );
             }
 
             if (array_key_exists($key, $params)) {
