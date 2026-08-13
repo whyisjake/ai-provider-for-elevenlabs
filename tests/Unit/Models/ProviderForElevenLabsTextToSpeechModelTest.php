@@ -640,7 +640,7 @@ class ProviderForElevenLabsTextToSpeechModelTest extends TestCase
     /**
      * @return array<string, array{string}>
      */
-    public function reservedParameterProvider(): array
+    public static function reservedParameterProvider(): array
     {
         return [
             'text'           => ['text'],
@@ -670,7 +670,7 @@ class ProviderForElevenLabsTextToSpeechModelTest extends TestCase
     /**
      * @return array<string, array{string}>
      */
-    public function providerManagedParameterProvider(): array
+    public static function providerManagedParameterProvider(): array
     {
         return [
             'previous_text' => ['previous_text'],

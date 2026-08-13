@@ -42,7 +42,7 @@ Behaviour you would notice:
 
 Project changes:
 
-- Continuous integration: unit tests on PHP 7.4 through 8.4, phpcs, PHPStan at `max`, and a
+- Continuous integration: unit tests on PHP 8.1 through 8.5, phpcs, PHPStan at `max`, and a
   packaging job that plants canary secrets and fails if any reach the release ZIP
 - Unit tests 46 to 59, integration tests 10 to 12, covering pagination, voice resolution, and the
   credentials-arrive-late regression
@@ -55,7 +55,9 @@ Most of this would be just as useful upstream, and none of it is a deliberate di
 
 ## Requirements
 
-- PHP 7.4 or higher
+- PHP 8.1 or higher. WordPress core's own floor is 7.4, but it reports 7.4 as
+  insecure and unsupported and recommends 8.3, and 7.4 has had no security
+  support since November 2022.
 - The [PHP AI Client](https://github.com/WordPress/php-ai-client) SDK, ^1.2, must be loadable:
     - **WordPress 7.0 and later** bundle it in core (`wp-includes/php-ai-client/`). Nothing to install.
     - **Earlier WordPress** does not. The SDK is a Composer package, not a plugin -- there is

@@ -4,7 +4,7 @@ Tags: ai, elevenlabs, text-to-speech, tts, sound-effects
 Requires at least: 6.9
 Tested up to: 7.0
 Stable tag: 0.4.0
-Requires PHP: 7.4
+Requires PHP: 8.1
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -34,7 +34,7 @@ This is a fork of [ai-provider-for-elevenlabs](https://github.com/saarnilauri/ai
 
 **Requirements:**
 
-* PHP 7.4 or higher
+* PHP 8.1 or higher. WordPress itself allows 7.4, but classifies it as insecure and unsupported, and 7.4 has had no security support since November 2022.
 * The PHP AI Client SDK. WordPress 7.0 and later bundle it in core, so there is nothing to install. On earlier WordPress it must be provided by something else on the site, as it is a Composer package rather than a plugin.
 * ElevenLabs API key
 
@@ -90,6 +90,7 @@ The default output format is MP3 (mp3_44100_128). Other supported formats includ
 == Changelog ==
 
 = 0.4.0 =
+* **Breaking:** raise the minimum PHP version to 8.1. WordPress core still allows 7.4, but reports it as insecure and unsupported and recommends 8.3, and 7.4 has had no security support since November 2022. Sites on PHP below 8.1 will not be offered this update
 * Narrate text longer than the model's per-request limit. It is split on paragraph and sentence boundaries, narrated across several requests that carry neighbouring text so the seams are not abrupt, and returned as a single audio file. Previously this failed with an API error
 * Note that long-form narration is slow: 16,799 characters took 37 seconds in testing, longer than PHP's default max_execution_time. See the FAQ before using it during a page request
 * Refuse to split when the output format cannot be joined, such as Opus, rather than returning audio that is subtly broken. The check happens before any request is billed

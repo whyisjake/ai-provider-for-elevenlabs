@@ -5,7 +5,7 @@
  * Plugin URI: https://github.com/whyisjake/ai-provider-for-elevenlabs
  * Description: ElevenLabs text-to-speech provider for the WordPress AI Client.
  * Requires at least: 6.9
- * Requires PHP: 7.4
+ * Requires PHP: 8.1
  * Version: 0.4.0
  * Author: Jake Spurlock
  * Author URI: https://profiles.wordpress.org/whyisjake/

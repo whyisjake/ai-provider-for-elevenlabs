@@ -100,7 +100,7 @@ class TextChunkerTest extends TestCase
     /**
      * @return array<string, array{string, int}>
      */
-    public function losslessTextProvider(): array
+    public static function losslessTextProvider(): array
     {
         return [
             'short'                => ['Hello world.', 100],
@@ -191,7 +191,7 @@ class TextChunkerTest extends TestCase
     /**
      * @return array<string, array{int}>
      */
-    public function invalidLimitProvider(): array
+    public static function invalidLimitProvider(): array
     {
         return [
             'zero'     => [0],
