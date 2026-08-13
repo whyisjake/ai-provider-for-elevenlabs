@@ -314,6 +314,22 @@ npx @wordpress/env run cli wp plugin list
 npx @wordpress/env run cli wp eval 'echo WordPress\AiClient\AiClient::VERSION;'
 ```
 
+With only ElevenLabs configured, the AI plugin warns that it needs a valid AI
+Connector. That is expected, not a fault in this provider: the AI plugin treats
+a connector as valid only when it can generate text, and ElevenLabs generates
+speech. Both facts are observable:
+
+```bash
+npx @wordpress/env run cli wp eval '
+$p = wp_ai_client_prompt("Test");
+var_dump($p->is_supported_for_text_generation());            // false
+var_dump($p->is_supported_for_text_to_speech_conversion());  // true
+'
+```
+
+Add a text-generation connector alongside it to exercise the AI plugin's own
+features.
+
 The ports are pinned to 8890/8891 rather than wp-env's 8888/8889 defaults, so
 this environment can run alongside other wp-env projects without colliding.
 `testsPort` is deprecated upstream and prints a warning, but it is kept

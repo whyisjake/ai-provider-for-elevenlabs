@@ -59,6 +59,12 @@ Set the `outputSpeechVoice` option in your `ModelConfig` to the voice ID. You ca
 
 If you do not set a voice, one is chosen automatically from your account, preferring a premade voice. This means a plain prompt works without any voice configuration.
 
+= The AI plugin says I need a valid AI Connector. Is this one broken? =
+
+No. The [AI plugin](https://wordpress.org/plugins/ai) treats a connector as valid only if it can generate text, because its features (alt text, summarisation, classification, comment moderation) all need a text model. ElevenLabs generates speech, not text, so it cannot satisfy that check no matter how it is configured.
+
+The ElevenLabs connector is still working for what it does. To clear the warning, configure a text-generation connector such as Anthropic, OpenAI, or Google alongside it.
+
 = What audio formats are supported? =
 
 The default output format is MP3 (mp3_44100_128). Other supported formats include PCM, ulaw, Opus, and AAC at various sample rates and bitrates.
