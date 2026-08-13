@@ -592,7 +592,7 @@ class ProviderForElevenLabsTextToSpeechModel extends AbstractApiBasedModel imple
      * @param string $outputFormat The ElevenLabs output_format value.
      * @return string The MIME type.
      */
-    protected function resolveMimeTypeFromFormat(string $outputFormat): string
+    public function resolveMimeTypeFromFormat(string $outputFormat): string
     {
         $prefix = explode('_', $outputFormat)[0];
         return self::OUTPUT_FORMAT_PREFIX_TO_MIME[$prefix] ?? 'audio/mpeg';

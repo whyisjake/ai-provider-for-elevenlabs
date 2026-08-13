@@ -24,6 +24,8 @@ declare(strict_types=1);
 
 namespace AiProviderForElevenLabs;
 
+use AiProviderForElevenLabs\Jobs\NarrationJobs;
+use AiProviderForElevenLabs\Jobs\WpCronNarrationQueue;
 use AiProviderForElevenLabs\Provider\ElevenLabsApiKeyAuthentication;
 use AiProviderForElevenLabs\Provider\ProviderForElevenLabs;
 use WordPress\AiClient\AiClient;
@@ -57,6 +59,7 @@ function load_classes(): void
     require_once $plugin_dir . '/Jobs/NarrationQueue.php';
     require_once $plugin_dir . '/Jobs/WpCronNarrationQueue.php';
     require_once $plugin_dir . '/Jobs/NarrationJobRunner.php';
+    require_once $plugin_dir . '/Jobs/NarrationJobs.php';
     require_once $plugin_dir . '/Provider/ElevenLabsApiKeyAuthentication.php';
     require_once $plugin_dir . '/Provider/ElevenLabsProviderAvailability.php';
     require_once $plugin_dir . '/Provider/ProviderForElevenLabs.php';
@@ -161,3 +164,26 @@ function restore_elevenlabs_authentication(): void
 // pre-7.0, and after core's _wp_connectors_pass_default_keys_to_ai_client
 // (init 20) on WordPress 7.0+.
 add_action('init', __NAMESPACE__ . '\\restore_elevenlabs_authentication', 21);
+
+/**
+ * Narrates one chunk of a background narration job.
+ *
+ * The callback for the scheduled event. Arguments arrive from the cron array,
+ * so they are cast rather than trusted.
+ *
+ * @since n.e.x.t
+ *
+ * @param mixed $job_id      The job id.
+ * @param mixed $chunk_index The chunk to narrate.
+ * @return void
+ */
+function run_narration_chunk($job_id, $chunk_index): void
+{
+    if (!is_string($job_id) || $job_id === '' || !is_numeric($chunk_index)) {
+        return;
+    }
+
+    (new NarrationJobs())->runChunk($job_id, (int) $chunk_index);
+}
+
+add_action(WpCronNarrationQueue::HOOK, __NAMESPACE__ . '\\run_narration_chunk', 10, 2);
