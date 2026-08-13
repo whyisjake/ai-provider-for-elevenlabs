@@ -12,4 +12,19 @@
 /scripts
 /tests
 /vendor
+/dist
 RELEASE_NOTES_*.md
+
+# Local credentials. The integration suite reads ELEVENLABS_API_KEY from .env,
+# so this must never be packaged.
+.env
+.env.*
+
+# Build, tool, and editor artefacts.
+/.phpunit.cache
+.phpunit.result.cache
+/.claude
+/.codex
+/.shotgun
+.DS_Store
+*.zip

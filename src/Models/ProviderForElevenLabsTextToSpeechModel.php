@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace AiProviderForElevenLabs\Models;
 
 use AiProviderForElevenLabs\Provider\ProviderForElevenLabs;
+use AiProviderForElevenLabs\Voices\VoiceDirectory;
+use Exception;
 use WordPress\AiClient\Common\Exception\InvalidArgumentException;
 use WordPress\AiClient\Files\DTO\File;
 use WordPress\AiClient\Messages\DTO\Message;
@@ -87,6 +89,15 @@ class ProviderForElevenLabsTextToSpeechModel extends AbstractApiBasedModel imple
         'opus' => 'audio/opus',
         'aac'  => 'audio/aac',
     ];
+
+    /**
+     * Lazily built voice directory used to resolve a default voice.
+     *
+     * @since n.e.x.t
+     *
+     * @var VoiceDirectory|null
+     */
+    private ?VoiceDirectory $voiceDirectory = null;
 
     /**
      * {@inheritDoc}
@@ -178,23 +189,71 @@ class ProviderForElevenLabsTextToSpeechModel extends AbstractApiBasedModel imple
     }
 
     /**
-     * Gets the voice ID from the model configuration.
+     * Gets the voice ID to synthesise with.
+     *
+     * ElevenLabs requires a voice ID in the request path, but the AI Client's
+     * `outputSpeechVoice` option is optional, so a caller that simply prompts
+     * the provider supplies no voice at all. Rather than fail that case, fall
+     * back to a default drawn from the account's own voices.
      *
      * @since 0.1.0
      *
      * @return string The voice ID.
-     * @throws InvalidArgumentException If no voice ID is configured.
+     * @throws InvalidArgumentException If no voice is configured and none can be discovered.
      */
     protected function getVoiceId(): string
     {
         $voiceId = $this->getConfig()->getOutputSpeechVoice();
-        if ($voiceId === null || $voiceId === '') {
-            throw new InvalidArgumentException(
-                'The outputSpeechVoice option is required for ElevenLabs text-to-speech.'
-            );
+        if ($voiceId !== null && $voiceId !== '') {
+            return $voiceId;
         }
 
-        return $voiceId;
+        $failureReason = null;
+
+        try {
+            $defaultVoiceId = $this->voiceDirectory()->getDefaultVoiceId();
+        } catch (Exception $e) {
+            $defaultVoiceId = null;
+            $failureReason = $e->getMessage();
+        }
+
+        if ($defaultVoiceId !== null && $defaultVoiceId !== '') {
+            return $defaultVoiceId;
+        }
+
+        $message = 'No voice was configured and no default could be determined for this ElevenLabs '
+            . 'account. Set the "outputSpeechVoice" option to a voice ID from '
+            . 'https://elevenlabs.io/app/voice-library.';
+
+        if ($failureReason !== null) {
+            $message .= ' Voice lookup failed: ' . $failureReason;
+        }
+
+        throw new InvalidArgumentException($message);
+    }
+
+    /**
+     * Gets a voice directory backed by this model's transport and credentials.
+     *
+     * Built from the model's own transporter and authentication rather than the
+     * provider's shared instance, so it is always configured whenever the model
+     * itself is able to make requests.
+     *
+     * @since n.e.x.t
+     *
+     * @return VoiceDirectory The voice directory.
+     */
+    protected function voiceDirectory(): VoiceDirectory
+    {
+        if ($this->voiceDirectory === null) {
+            $voiceDirectory = new VoiceDirectory();
+            $voiceDirectory->setHttpTransporter($this->getHttpTransporter());
+            $voiceDirectory->setRequestAuthentication($this->getRequestAuthentication());
+
+            $this->voiceDirectory = $voiceDirectory;
+        }
+
+        return $this->voiceDirectory;
     }
 
     /**

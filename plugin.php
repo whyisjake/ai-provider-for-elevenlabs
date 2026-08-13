@@ -2,16 +2,20 @@
 
 /**
  * Plugin Name: AI Provider for ElevenLabs
- * Plugin URI: https://github.com/saarnilauri/ai-provider-for-elevenlabs
- * Description: ElevenLabs provider for the WordPress AI API.
+ * Plugin URI: https://github.com/whyisjake/ai-provider-for-elevenlabs
+ * Description: ElevenLabs text-to-speech provider for the WordPress AI Client.
  * Requires at least: 6.9
  * Requires PHP: 7.4
- * Version: 0.2.0
- * Author: Lauri Saarni
- * Author URI: https://profiles.wordpress.org/laurisaarni/
+ * Version: 0.3.0
+ * Author: Jake Spurlock
+ * Author URI: https://profiles.wordpress.org/whyisjake/
  * License: GPL-2.0-or-later
  * License URI: https://spdx.org/licenses/GPL-2.0-or-later.html
  * Text Domain: ai-provider-for-elevenlabs
+ *
+ * Forked from ai-provider-for-elevenlabs by Lauri Saarni, used under GPL-2.0-or-later.
+ *
+ * @link https://github.com/saarnilauri/ai-provider-for-elevenlabs
  *
  * @package AiProviderForElevenLabs
  */

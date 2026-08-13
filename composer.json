@@ -1,6 +1,6 @@
 {
-    "name": "saarnilauri/ai-provider-for-elevenlabs",
-    "description": "ElevenLabs provider for the WordPress AI API.",
+    "name": "whyisjake/ai-provider-for-elevenlabs",
+    "description": "ElevenLabs text-to-speech provider for the WordPress AI Client.",
     "license": "GPL-2.0-or-later",
     "type": "wordpress-plugin",
     "keywords": [
@@ -12,14 +12,20 @@
     ],
     "authors": [
         {
+            "name": "Jake Spurlock",
+            "homepage": "https://profiles.wordpress.org/whyisjake/",
+            "role": "Maintainer"
+        },
+        {
             "name": "Lauri Saarni",
-            "homepage": "https://profiles.wordpress.org/laurisaarni/"
+            "homepage": "https://profiles.wordpress.org/laurisaarni/",
+            "role": "Original author"
         }
     ],
-    "homepage": "https://github.com/saarnilauri/ai-provider-for-elevenlabs",
+    "homepage": "https://github.com/whyisjake/ai-provider-for-elevenlabs",
     "support": {
-        "issues": "https://github.com/saarnilauri/ai-provider-for-elevenlabs/issues",
-        "source": "https://github.com/saarnilauri/ai-provider-for-elevenlabs"
+        "issues": "https://github.com/whyisjake/ai-provider-for-elevenlabs/issues",
+        "source": "https://github.com/whyisjake/ai-provider-for-elevenlabs"
     },
     "require": {
         "php": ">=7.4"

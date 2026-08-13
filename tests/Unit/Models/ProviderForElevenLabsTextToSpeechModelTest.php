@@ -13,6 +13,7 @@ use WordPress\AiClient\Messages\Enums\MessageRoleEnum;
 use WordPress\AiClient\Providers\DTO\ProviderMetadata;
 use WordPress\AiClient\Providers\Http\Contracts\HttpTransporterInterface;
 use WordPress\AiClient\Providers\Http\Contracts\RequestAuthenticationInterface;
+use WordPress\AiClient\Providers\Http\DTO\Request;
 use WordPress\AiClient\Providers\Http\DTO\Response;
 use WordPress\AiClient\Providers\Http\Exception\ClientException;
 use WordPress\AiClient\Providers\Http\Exception\ResponseException;
@@ -346,10 +347,87 @@ class ProviderForElevenLabsTextToSpeechModelTest extends TestCase
     }
 
     /**
-     * Tests that missing voice ID throws InvalidArgumentException.
+     * Routes voice-list requests to a JSON payload and everything else to audio.
+     *
+     * @param list<array<string, mixed>> $voices        Voices the account should report.
+     * @param list<string>               $capturedUris  Populated with every request URI sent.
+     * @return void
      */
-    public function testMissingVoiceIdThrowsException(): void
+    private function stubTransportWithVoiceList(array $voices, array &$capturedUris): void
     {
+        $capturedUris = [];
+
+        $this->mockRequestAuthentication
+            ->method('authenticateRequest')
+            ->willReturnArgument(0);
+
+        $this->mockHttpTransporter
+            ->method('send')
+            ->willReturnCallback(
+                static function (Request $request) use ($voices, &$capturedUris): Response {
+                    $capturedUris[] = $request->getUri();
+
+                    if (strpos($request->getUri(), '/voices') !== false) {
+                        return new Response(
+                            200,
+                            ['Content-Type' => 'application/json'],
+                            json_encode(['voices' => $voices, 'has_more' => false], JSON_THROW_ON_ERROR)
+                        );
+                    }
+
+                    return new Response(200, ['Content-Type' => ['audio/mpeg']], 'audio-data');
+                }
+            );
+    }
+
+    /**
+     * Tests that an unconfigured voice falls back to the account's default voice.
+     */
+    public function testDefaultVoiceIsUsedWhenNoneIsConfigured(): void
+    {
+        $capturedUris = [];
+        $this->stubTransportWithVoiceList(
+            [
+                ['voice_id' => 'cloned-voice', 'name' => 'MyClone', 'category' => 'cloned'],
+                ['voice_id' => 'premade-voice', 'name' => 'Rachel', 'category' => 'premade'],
+            ],
+            $capturedUris
+        );
+
+        $model = $this->createModel();
+        $result = $model->convertTextToSpeechResult($this->createPrompt());
+
+        $this->assertInstanceOf(GenerativeAiResult::class, $result);
+        $this->assertStringContainsString('/v2/voices', $capturedUris[0]);
+        $this->assertStringContainsString('text-to-speech/premade-voice', $capturedUris[1]);
+    }
+
+    /**
+     * Tests that an explicitly configured voice is used without any voice lookup.
+     */
+    public function testConfiguredVoiceSkipsTheVoiceLookup(): void
+    {
+        $capturedUris = [];
+        $this->stubTransportWithVoiceList(
+            [['voice_id' => 'premade-voice', 'name' => 'Rachel', 'category' => 'premade']],
+            $capturedUris
+        );
+
+        $model = $this->createModel($this->createConfig('ExplicitVoice'));
+        $model->convertTextToSpeechResult($this->createPrompt());
+
+        $this->assertCount(1, $capturedUris);
+        $this->assertStringContainsString('text-to-speech/ExplicitVoice', $capturedUris[0]);
+    }
+
+    /**
+     * Tests that an account with no voices still produces an actionable error.
+     */
+    public function testMissingVoiceIdThrowsExceptionWhenAccountHasNoVoices(): void
+    {
+        $capturedUris = [];
+        $this->stubTransportWithVoiceList([], $capturedUris);
+
         $model = $this->createModel();
 
         $this->expectException(InvalidArgumentException::class);

@@ -1,9 +1,9 @@
 === AI Provider for ElevenLabs ===
-Contributors: laurisaarni
+Contributors: whyisjake
 Tags: ai, elevenlabs, text-to-speech, tts, sound-effects
 Requires at least: 6.9
 Tested up to: 7.0
-Stable tag: 0.2.0
+Stable tag: 0.3.0
 Requires PHP: 7.4
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -14,6 +14,8 @@ Independent WordPress AI Client provider for ElevenLabs text-to-speech and sound
 
 This plugin provides a third-party ElevenLabs integration for the PHP AI Client SDK. It enables WordPress sites to use ElevenLabs models for text-to-speech conversion and sound effects generation.
 It is not affiliated with, endorsed by, or sponsored by ElevenLabs.
+
+This is a fork of [ai-provider-for-elevenlabs](https://github.com/saarnilauri/ai-provider-for-elevenlabs) by Lauri Saarni, used under GPL-2.0-or-later.
 
 **Features:**
 
@@ -55,11 +57,25 @@ No, this plugin requires the PHP AI Client plugin to be installed and activated.
 
 Set the `outputSpeechVoice` option in your `ModelConfig` to the voice ID. You can discover available voices using the `VoiceDirectory` class or the ElevenLabs voice library.
 
+If you do not set a voice, one is chosen automatically from your account, preferring a premade voice. This means a plain prompt works without any voice configuration.
+
 = What audio formats are supported? =
 
 The default output format is MP3 (mp3_44100_128). Other supported formats include PCM, ulaw, Opus, and AAC at various sample rates and bitrates.
 
 == Changelog ==
+
+= 0.3.0 =
+* First release of the fork maintained by Jake Spurlock, continuing from 0.2.0 by Lauri Saarni
+* Move voice listing from the deprecated `/v1/voices` endpoint to `/v2/voices`. The old endpoint stops working entirely once a workspace holds more than 500 voices
+* Walk every page of the voice list, so accounts with more than one page of voices are no longer truncated
+* Choose a voice automatically when `outputSpeechVoice` is not set, preferring a premade voice. Previously a prompt without an explicit voice threw an exception
+* Cache the voice list per API key, so repeated lookups within a request no longer re-fetch it
+* Fix a voice directory that could be cached in a permanently unusable state when credentials were not yet available, causing every later voice lookup to fail
+* Report the provider as "ElevenLabs" in the connector UI, and add a provider description
+* Stop packaging local development files into the release ZIP. A local `.env`, which the integration suite uses to hold an ElevenLabs API key, was not excluded and would have been published inside the plugin ZIP
+* Add the GPL-2.0 licence text, which was declared but not included
+* Fix PSR-4 autoloading for the test suite
 
 = 0.2.0 =
 * WordPress 7.0 compatibility: read the API key from the core Connectors option (`connectors_ai_elevenlabs_api_key`, Settings > Connectors)

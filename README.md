@@ -4,6 +4,10 @@ A third-party provider for [ElevenLabs](https://elevenlabs.io/) in the [PHP AI C
 
 This project is independent and is not affiliated with, endorsed by, or sponsored by ElevenLabs.
 
+> Forked from [saarnilauri/ai-provider-for-elevenlabs](https://github.com/saarnilauri/ai-provider-for-elevenlabs)
+> by [Lauri Saarni](https://profiles.wordpress.org/laurisaarni/), used under GPL-2.0-or-later.
+> Maintained here by [Jake Spurlock](https://profiles.wordpress.org/whyisjake/).
+
 ## Features
 
 - **Text-to-Speech** -- high-quality voice synthesis with many voices and models
@@ -15,21 +19,21 @@ This project is independent and is not affiliated with, endorsed by, or sponsore
 ## Requirements
 
 - PHP 7.4 or higher
-- [wordpress/php-ai-client](https://github.com/WordPress/php-ai-client) ^1.1 must be installed
+- [wordpress/php-ai-client](https://github.com/WordPress/php-ai-client) ^1.2 must be installed
 
 ## Installation
 
 ### As a Composer Package
 
 ```bash
-composer require saarnilauri/ai-provider-for-elevenlabs
+composer require whyisjake/ai-provider-for-elevenlabs
 ```
 
 The Composer distribution is intended for library usage and excludes `plugin.php`.
 
 ### As a WordPress Plugin
 
-1. Download `ai-provider-for-elevenlabs.zip` from [GitHub Releases](https://github.com/saarnilauri/ai-provider-for-elevenlabs/releases) (do not use GitHub "Source code" archives)
+1. Download `ai-provider-for-elevenlabs.zip` from [GitHub Releases](https://github.com/whyisjake/ai-provider-for-elevenlabs/releases) (do not use GitHub "Source code" archives)
 2. Upload the ZIP in WordPress admin via Plugins > Add New Plugin > Upload Plugin
 3. Ensure the PHP AI Client plugin is installed and activated
 4. Activate the plugin through the WordPress admin
@@ -53,9 +57,11 @@ ElevenLabs API keys can be scoped with specific permissions. The minimum permiss
 | Text-to-speech | Text-to-speech generation | Required for TTS functionality |
 | Sound generation | Sound effects generation | Required for sound effects |
 | Models | Dynamic model discovery | Optional -- the plugin falls back to a hardcoded model list when this permission is missing |
-| Voices | Listing available voices | Only needed if you use the `VoiceDirectory` to browse voices |
+| Voices | Listing available voices | Needed to browse voices via `VoiceDirectory`, and to pick a voice automatically when `outputSpeechVoice` is not set |
 
-For full functionality, grant **Text-to-speech**, **Sound generation**, **Models**, and **Voices** permissions. For a minimal TTS-only setup, **Text-to-speech** alone is sufficient.
+For full functionality, grant **Text-to-speech**, **Sound generation**, **Models**, and **Voices** permissions.
+
+For a minimal TTS-only setup, **Text-to-speech** alone is sufficient *provided you always set `outputSpeechVoice` explicitly*. Without the **Voices** permission the provider cannot discover a default voice, and a prompt that omits `outputSpeechVoice` will fail.
 
 You can manage API key permissions at [https://elevenlabs.io/app/settings/api-keys](https://elevenlabs.io/app/settings/api-keys).
 
@@ -85,17 +91,28 @@ putenv('ELEVENLABS_API_KEY=your-api-key');
 use WordPress\AiClient\AiClient;
 use WordPress\AiClient\Providers\Models\DTO\ModelConfig;
 
-// Simple TTS -- returns a File object with base64-encoded audio.
+// Simplest form -- a voice is chosen automatically from your account.
 $audio = AiClient::prompt( 'Hello, this is a test of ElevenLabs text to speech.' )
     ->usingProvider( 'elevenlabs' )
-    ->usingModelConfig( ModelConfig::fromArray( [
-        'outputSpeechVoice' => 'JBFqnCBsd6RMkjVDRZzb', // Voice ID (required)
-    ] ) )
     ->convertTextToSpeech();
 
 // Save the audio file.
 file_put_contents( 'output.mp3', base64_decode( $audio->toAudioFile()->getBase64Data() ) );
 ```
+
+To pick the voice yourself, set `outputSpeechVoice` to a voice ID:
+
+```php
+$audio = AiClient::prompt( 'Hello, this is a test of ElevenLabs text to speech.' )
+    ->usingProvider( 'elevenlabs' )
+    ->usingModelConfig( ModelConfig::fromArray( [
+        'outputSpeechVoice' => 'JBFqnCBsd6RMkjVDRZzb',
+    ] ) )
+    ->convertTextToSpeech();
+```
+
+When `outputSpeechVoice` is omitted, the provider picks a voice from your account, preferring a
+premade one. The voice list is cached, so this costs one extra API call at most.
 
 ### Text-to-Speech with Custom Voice Settings
 
@@ -134,7 +151,8 @@ file_put_contents( 'thunder.mp3', base64_decode( $audio->toAudioFile()->getBase6
 
 ### Listing Available Voices
 
-The plugin provides a `VoiceDirectory` for discovering available voices from the ElevenLabs `/voices` endpoint.
+The plugin provides a `VoiceDirectory` for discovering available voices from the ElevenLabs
+`/v2/voices` endpoint. Every page of results is fetched, and the list is cached per API key.
 
 ```php
 use WordPress\AiClient\AiClient;

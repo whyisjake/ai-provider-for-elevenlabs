@@ -39,6 +39,16 @@ class ProviderForElevenLabsModelMetadataDirectory extends AbstractOpenAiCompatib
      * The ElevenLabs sound generation endpoint does not require a model ID,
      * so this is registered as a synthetic entry in the metadata directory.
      *
+     * Note that this entry is advertised under `CapabilityEnum::speechGeneration()`,
+     * which is a stand-in: sound effects are not speech. The AI Client has no
+     * sound generation capability yet, and adding one is the subject of an open
+     * upstream pull request. Once that lands, this entry and
+     * {@see \AiProviderForElevenLabs\Models\ProviderForElevenLabsSoundGenerationModel}
+     * should move onto the real capability, and the provider's `createModel()`
+     * branch should follow.
+     *
+     * @link https://github.com/WordPress/php-ai-client/pull/222
+     *
      * @since 0.1.0
      *
      * @var string
@@ -54,14 +64,6 @@ class ProviderForElevenLabsModelMetadataDirectory extends AbstractOpenAiCompatib
      */
     private const SOUND_GENERATION_MODEL_NAME = 'ElevenLabs Sound Generation';
 
-    /**
-     * {@inheritDoc}
-     *
-     * Extends the base implementation to add a hardcoded sound generation model
-     * entry, since the ElevenLabs /models endpoint only returns TTS models.
-     *
-     * @since 0.1.0
-     */
     /**
      * Known ElevenLabs TTS models used as fallback when the /models endpoint
      * is inaccessible (e.g. API key lacks models_read permission).
