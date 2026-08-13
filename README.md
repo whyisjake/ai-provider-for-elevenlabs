@@ -283,8 +283,12 @@ and no amount of PHPUnit will exercise it. Use [`wp-env`](https://developer.word
 npx @wordpress/env start
 ```
 
-This boots current WordPress with the plugin mounted and activated. WordPress 7.0
-ships the PHP AI Client in core, so no companion plugin is required.
+This boots current WordPress with the plugin mounted and activated, at
+<http://localhost:8890> (admin/password). WordPress 7.0 ships the PHP AI Client
+in core, so no companion plugin is required.
+
+The ports are pinned to 8890/8891 rather than wp-env's 8888/8889 defaults, so
+this environment can run alongside other wp-env projects without colliding.
 
 To make the provider's API key available inside that environment, copy the
 override template -- it defines `ELEVENLABS_API_KEY` as a PHP constant, which the
