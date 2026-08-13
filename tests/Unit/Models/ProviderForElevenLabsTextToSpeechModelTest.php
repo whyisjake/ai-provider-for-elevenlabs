@@ -886,4 +886,143 @@ class ProviderForElevenLabsTextToSpeechModelTest extends TestCase
         $this->expectException(ResponseException::class);
         $model->convertTextToSpeechResult($this->createPrompt($this->longText()));
     }
+
+    // ------------------------------------------------------------------
+    // Per-chunk narration seam
+    // ------------------------------------------------------------------
+
+    public function testNarrateChunkIssuesExactlyOneRequestForTheGivenText(): void
+    {
+        $bodies = [];
+        $this->captureAllRequestBodies($bodies);
+
+        $this->createModel($this->createConfig('v1'))->narrateChunk('v1', 'One piece of text.');
+
+        $this->assertCount(1, $bodies);
+        $this->assertSame('One piece of text.', $bodies[0]['text']);
+        $this->assertSame('eleven_multilingual_v2', $bodies[0]['model_id']);
+        $this->assertArrayHasKey('voice_settings', $bodies[0]);
+    }
+
+    public function testNarrateChunkReturnsTheRawAudioBytes(): void
+    {
+        $bodies = [];
+        $this->captureAllRequestBodies($bodies);
+
+        $model = $this->createModel($this->createConfig('v1'));
+
+        $this->assertSame('audio-1|', $model->narrateChunk('v1', 'Text.'));
+    }
+
+    public function testNarrateChunkCarriesNeighboursWhenGiven(): void
+    {
+        $bodies = [];
+        $this->captureAllRequestBodies($bodies);
+
+        $this->createModel($this->createConfig('v1'))
+            ->narrateChunk('v1', 'Middle.', 'Before.', 'After.');
+
+        $this->assertSame('Before.', $bodies[0]['previous_text']);
+        $this->assertSame('After.', $bodies[0]['next_text']);
+    }
+
+    public function testNarrateChunkOmitsContinuityWhenNoNeighboursGiven(): void
+    {
+        $bodies = [];
+        $this->captureAllRequestBodies($bodies);
+
+        $this->createModel($this->createConfig('v1'))->narrateChunk('v1', 'Alone.');
+
+        $this->assertArrayNotHasKey('previous_text', $bodies[0]);
+        $this->assertArrayNotHasKey('next_text', $bodies[0]);
+    }
+
+    /**
+     * A job persists neighbours as strings, so the first and last chunk arrive
+     * with empty ones rather than nulls. They must be treated as absent, or the
+     * request carries a meaningless empty continuity parameter.
+     */
+    public function testNarrateChunkTreatsEmptyNeighboursAsAbsent(): void
+    {
+        $bodies = [];
+        $this->captureAllRequestBodies($bodies);
+
+        $this->createModel($this->createConfig('v1'))->narrateChunk('v1', 'Alone.', '', '');
+
+        $this->assertArrayNotHasKey('previous_text', $bodies[0]);
+        $this->assertArrayNotHasKey('next_text', $bodies[0]);
+    }
+
+    public function testNarrateChunkUsesTheVoiceItIsGivenRatherThanTheConfiguredOne(): void
+    {
+        $uris = [];
+
+        $this->mockRequestAuthentication->method('authenticateRequest')->willReturnArgument(0);
+        $this->mockHttpTransporter
+            ->method('send')
+            ->willReturnCallback(static function (Request $request) use (&$uris): Response {
+                $uris[] = $request->getUri();
+                return new Response(200, ['Content-Type' => ['audio/mpeg']], 'audio');
+            });
+
+        $this->createModel($this->createConfig('configured-voice'))
+            ->narrateChunk('job-voice', 'Text.');
+
+        $this->assertStringContainsString('job-voice', $uris[0]);
+        $this->assertStringNotContainsString('configured-voice', $uris[0]);
+    }
+
+    public function testNarrateChunkRaisesOnAnEmptyResponseBody(): void
+    {
+        $this->mockRequestAuthentication->method('authenticateRequest')->willReturnArgument(0);
+        $this->mockHttpTransporter
+            ->method('send')
+            ->willReturn(new Response(200, ['Content-Type' => ['audio/mpeg']], ''));
+
+        $model = $this->createModel($this->createConfig('v1'));
+
+        $this->expectException(ResponseException::class);
+        $model->narrateChunk('v1', 'Text.');
+    }
+
+    public function testSplitAcceptsASmallerLimitThanTheModelAllows(): void
+    {
+        $text = $this->longText(20);
+        $chunks = $this->createModel($this->createConfig('v1'))
+            ->splitTextForRequests($text, 'mp3_44100_128', 200);
+
+        $this->assertGreaterThan(1, count($chunks));
+        $this->assertSame($text, implode('', $chunks), 'Splitting lost or duplicated text.');
+
+        foreach ($chunks as $chunk) {
+            $this->assertLessThanOrEqual(200, mb_strlen($chunk));
+        }
+    }
+
+    /**
+     * A limit above what the API accepts is never valid, so it is clamped rather
+     * than trusted -- otherwise a job could talk the model into a request the
+     * endpoint rejects outright.
+     */
+    public function testSplitClampsALimitAboveTheModelMaximum(): void
+    {
+        $chunks = $this->createModel($this->createConfig('v1'))
+            ->splitTextForRequests($this->longText(), 'mp3_44100_128', 10000000);
+
+        $this->assertGreaterThan(1, count($chunks));
+
+        foreach ($chunks as $chunk) {
+            $this->assertLessThanOrEqual(10000, mb_strlen($chunk));
+        }
+    }
+
+    public function testSplitWithoutALimitStillUsesTheModelLimit(): void
+    {
+        $model = $this->createModel($this->createConfig('v1'));
+
+        $this->assertSame(
+            $model->splitTextForRequests($this->longText(), 'mp3_44100_128'),
+            $model->splitTextForRequests($this->longText(), 'mp3_44100_128', 10000)
+        );
+    }
 }

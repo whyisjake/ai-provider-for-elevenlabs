@@ -171,36 +171,23 @@ class ProviderForElevenLabsTextToSpeechModel extends AbstractApiBasedModel imple
         $voiceId = $this->getVoiceId();
         $outputFormat = $this->resolveOutputFormat();
 
-        $baseParams = $this->applyCustomOptions([
-            'text'           => $text,
-            'model_id'       => $this->metadata()->getId(),
-            'voice_settings' => $this->resolveVoiceSettings(),
-            'output_format'  => $outputFormat,
-        ]);
-
         $chunks = $this->splitTextForRequests($text, $outputFormat);
         $chunkCount = count($chunks);
 
         $binaryData = '';
         foreach ($chunks as $index => $chunk) {
-            $params = $baseParams;
-            $params['text'] = $chunk;
-
             /*
              * Give the model the neighbouring text so prosody carries across a
              * seam. Only meaningful when the text was actually split, so a
              * request that fits stays byte-identical to before.
              */
-            if ($chunkCount > 1) {
-                if ($index > 0) {
-                    $params['previous_text'] = $chunks[$index - 1];
-                }
-                if ($index < $chunkCount - 1) {
-                    $params['next_text'] = $chunks[$index + 1];
-                }
-            }
-
-            $binaryData .= $this->sendSpeechRequest($voiceId, $params);
+            $binaryData .= $this->narrateChunk(
+                $voiceId,
+                $chunk,
+                $chunkCount > 1 && $index > 0 ? $chunks[$index - 1] : null,
+                $chunkCount > 1 && $index < $chunkCount - 1 ? $chunks[$index + 1] : null,
+                $outputFormat
+            );
         }
 
         $mimeType = $this->resolveMimeTypeFromFormat($outputFormat);
@@ -218,6 +205,66 @@ class ProviderForElevenLabsTextToSpeechModel extends AbstractApiBasedModel imple
             $this->metadata(),
             []
         );
+    }
+
+    /**
+     * Narrates one piece of text and returns its audio bytes.
+     *
+     * This is the seam both narration paths share. The synchronous path walks
+     * the chunk list and calls it once per chunk; a background job calls it for
+     * a single chunk, having persisted the voice and format at enqueue time.
+     * Sharing one implementation is what stops the two drifting apart.
+     *
+     * @since n.e.x.t
+     *
+     * @param string      $voiceId      The voice to synthesise with.
+     * @param string      $chunk        The text for this request.
+     * @param string|null $previousText Text immediately before, for prosody.
+     * @param string|null $nextText     Text immediately after, for prosody.
+     * @param string|null $outputFormat Resolved format, or null to resolve now.
+     * @return string The raw audio bytes.
+     * @throws ResponseException If the response carries no audio.
+     */
+    public function narrateChunk(
+        string $voiceId,
+        string $chunk,
+        ?string $previousText = null,
+        ?string $nextText = null,
+        ?string $outputFormat = null
+    ): string {
+        $outputFormat ??= $this->resolveOutputFormat();
+
+        $params = $this->buildRequestParams($chunk, $outputFormat);
+
+        if ($previousText !== null && $previousText !== '') {
+            $params['previous_text'] = $previousText;
+        }
+
+        if ($nextText !== null && $nextText !== '') {
+            $params['next_text'] = $nextText;
+        }
+
+        return $this->sendSpeechRequest($voiceId, $params);
+    }
+
+    /**
+     * Builds the request body for one piece of text.
+     *
+     * @since n.e.x.t
+     *
+     * @param string $text         The text for this request.
+     * @param string $outputFormat The resolved ElevenLabs output format.
+     * @return array<string, mixed> The request body.
+     * @throws InvalidArgumentException If a custom option collides with a provider-set key.
+     */
+    protected function buildRequestParams(string $text, string $outputFormat): array
+    {
+        return $this->applyCustomOptions([
+            'text'           => $text,
+            'model_id'       => $this->metadata()->getId(),
+            'voice_settings' => $this->resolveVoiceSettings(),
+            'output_format'  => $outputFormat,
+        ]);
     }
 
     /**
@@ -265,7 +312,7 @@ class ProviderForElevenLabsTextToSpeechModel extends AbstractApiBasedModel imple
      * @return string The voice ID.
      * @throws InvalidArgumentException If no voice is configured and none can be discovered.
      */
-    protected function getVoiceId(): string
+    public function getVoiceId(): string
     {
         $voiceId = $this->getConfig()->getOutputSpeechVoice();
         if ($voiceId !== null && $voiceId !== '') {
@@ -304,14 +351,23 @@ class ProviderForElevenLabsTextToSpeechModel extends AbstractApiBasedModel imple
      *
      * @since n.e.x.t
      *
-     * @param string $text         The full prompt text.
-     * @param string $outputFormat The resolved ElevenLabs output format.
+     * @param string   $text         The full prompt text.
+     * @param string   $outputFormat The resolved ElevenLabs output format.
+     * @param int|null $limit        Chunk size to use, or null for the model's own limit.
      * @return list<string> The text for each request, in order.
      * @throws InvalidArgumentException If splitting is required but the format cannot be joined.
      */
-    protected function splitTextForRequests(string $text, string $outputFormat): array
+    public function splitTextForRequests(string $text, string $outputFormat, ?int $limit = null): array
     {
-        $limit = $this->maxTextLength();
+        $modelLimit = $this->maxTextLength();
+
+        /*
+         * A caller may ask for smaller pieces than the model allows: a
+         * background job sizes chunks by how long one request takes, not by
+         * what the API will accept. Asking for larger is never valid, so clamp
+         * rather than trust the caller to have checked.
+         */
+        $limit = $limit === null ? $modelLimit : min(max($limit, 1), $modelLimit);
 
         if (mb_strlen($text) <= $limit) {
             return [$text];
@@ -445,7 +501,7 @@ class ProviderForElevenLabsTextToSpeechModel extends AbstractApiBasedModel imple
      *
      * @return string The ElevenLabs output_format value.
      */
-    protected function resolveOutputFormat(): string
+    public function resolveOutputFormat(): string
     {
         $customOptions = $this->getConfig()->getCustomOptions();
         if (isset($customOptions['output_format']) && is_string($customOptions['output_format'])) {
