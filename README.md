@@ -3,6 +3,9 @@
 A third-party provider for [ElevenLabs](https://elevenlabs.io/) in the [PHP AI Client](https://github.com/WordPress/php-ai-client) SDK. Works as both a Composer package and a WordPress plugin.
 
 This project is independent and is not affiliated with, endorsed by, or sponsored by ElevenLabs.
+`assets/images/elevenlabs.svg` is the official ElevenLabs symbol from their
+[brand kit](https://elevenlabs.io/brand), used unmodified to identify the provider.
+The ElevenLabs name and logo are trademarks of ElevenLabs.
 
 > Forked from [saarnilauri/ai-provider-for-elevenlabs](https://github.com/saarnilauri/ai-provider-for-elevenlabs)
 > by [Lauri Saarni](https://profiles.wordpress.org/laurisaarni/), used under GPL-2.0-or-later.
