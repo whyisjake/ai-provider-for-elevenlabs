@@ -190,6 +190,58 @@ class TextToSpeechIntegrationTest extends TestCase
     }
 
     /**
+     * Narrates text long enough to require several requests.
+     *
+     * The default model accepts 10,000 characters per request, so this exceeds
+     * it deliberately. Beyond asserting that the audio comes back joined, this
+     * records wall-clock time: chunked narration runs several sequential API
+     * calls inside one synchronous request, and if a realistic post cannot
+     * finish inside a normal PHP execution limit then this belongs in a
+     * background job rather than a page request. The number is printed rather
+     * than asserted, because a threshold here would be arbitrary and flaky.
+     */
+    public function testLongTextIsNarratedAcrossRequests(): void
+    {
+        $paragraph = 'WordPress powers a large share of the web, and the arrival of a shared AI '
+            . 'client in core changes how plugins integrate with model providers. Rather than each '
+            . 'plugin shipping its own HTTP layer and credential handling, a provider registers '
+            . 'itself once and every consumer benefits. ';
+
+        // Comfortably past the 10,000 character limit of eleven_multilingual_v2.
+        $text = trim(str_repeat($paragraph, 60));
+        $this->assertGreaterThan(10000, mb_strlen($text));
+
+        $startedAt = microtime(true);
+
+        $audio = AiClient::prompt($text, $this->registry)
+            ->usingProvider('elevenlabs')
+            ->usingModelConfig(ModelConfig::fromArray([
+                'outputSpeechVoice' => self::DEFAULT_VOICE_ID,
+            ]))
+            ->convertTextToSpeech();
+
+        $elapsed = microtime(true) - $startedAt;
+
+        $this->assertTrue($audio->isAudio());
+        $audioData = base64_decode($audio->getBase64Data());
+        $this->assertNotEmpty($audioData);
+
+        $filePath = $this->audioOutputDir . '/tts_long_form.mp3';
+        file_put_contents($filePath, $audioData);
+
+        fwrite(
+            STDERR,
+            sprintf(
+                "\nLong-form narration: %d characters -> %s of audio in %.1fs.\n"
+                . "  Compare against your max_execution_time before relying on the synchronous path.\n",
+                mb_strlen($text),
+                number_format(strlen($audioData) / 1024, 0) . ' KB',
+                $elapsed
+            )
+        );
+    }
+
+    /**
      * Tests that convertTextToSpeechResult returns full result with metadata.
      */
     public function testTtsResultIncludesProviderMetadata(): void
