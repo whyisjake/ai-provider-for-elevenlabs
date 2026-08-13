@@ -2,30 +2,33 @@
 
 declare(strict_types=1);
 
-namespace AiProviderForElevenLabs\Tests\Unit\Jobs;
+namespace AiProviderForElevenLabs\Tests\Support;
 
 use AiProviderForElevenLabs\Jobs\NarrationJobStore;
 
 /**
- * Mock class for testing NarrationJobStore.
+ * A job store that keeps its audio somewhere disposable.
  *
  * Redirects job audio to a caller-supplied directory so the filesystem side can
  * be exercised without an uploads folder, and exposes the record seams so a
  * test can inject states -- an expired claim, say -- that would otherwise need
  * a controllable clock.
+ *
+ * Shared by the unit and integration suites: both need a store pointed at a
+ * temporary directory, and there is no reason for two of these.
  */
 class MockNarrationJobStore extends NarrationJobStore
 {
-    private string $base;
+    private string $root;
 
-    public function __construct(string $base)
+    public function __construct(string $root)
     {
-        $this->base = $base;
+        $this->root = $root;
     }
 
     protected function baseDirectory(): string
     {
-        return $this->base;
+        return $this->root;
     }
 
     /**

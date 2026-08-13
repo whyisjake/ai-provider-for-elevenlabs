@@ -9,6 +9,7 @@ use AiProviderForElevenLabs\Jobs\NarrationJobStore;
 use AiProviderForElevenLabs\Jobs\NarrationJobs;
 use AiProviderForElevenLabs\Jobs\WpCronNarrationQueue;
 use AiProviderForElevenLabs\Tests\Integration\Traits\IntegrationTestTrait;
+use AiProviderForElevenLabs\Tests\Support\TemporaryNarrationDirectory;
 use PHPUnit\Framework\TestCase;
 use WordPress\AiClient\Providers\Models\DTO\ModelConfig;
 use WordPress\AiClient\Providers\ProviderRegistry;
@@ -31,6 +32,7 @@ use WordPress\AiClient\Providers\ProviderRegistry;
 class AsyncNarrationIntegrationTest extends TestCase
 {
     use IntegrationTestTrait;
+    use TemporaryNarrationDirectory;
 
     /**
      * @var string A known premade voice ID (Rachel).
@@ -40,8 +42,6 @@ class AsyncNarrationIntegrationTest extends TestCase
     private ProviderRegistry $registry;
 
     private string $audioOutputDir;
-
-    private string $base;
 
     protected function setUp(): void
     {
@@ -55,23 +55,11 @@ class AsyncNarrationIntegrationTest extends TestCase
         if (!is_dir($this->audioOutputDir)) {
             mkdir($this->audioOutputDir, 0755, true);
         }
-
-        $this->base = sys_get_temp_dir() . '/narration-integration-' . bin2hex(random_bytes(6));
     }
 
     protected function tearDown(): void
     {
-        if (is_dir($this->base)) {
-            foreach ((array) glob($this->base . '/*') as $directory) {
-                if (is_dir((string) $directory)) {
-                    foreach ((array) glob($directory . '/*') as $file) {
-                        unlink((string) $file);
-                    }
-                    rmdir((string) $directory);
-                }
-            }
-            rmdir($this->base);
-        }
+        $this->removeNarrationDirectory();
 
         parent::tearDown();
     }
@@ -87,29 +75,9 @@ class AsyncNarrationIntegrationTest extends TestCase
         ));
     }
 
-    /**
-     * Builds a store that keeps its audio somewhere disposable.
-     */
-    private function createStore(): NarrationJobStore
-    {
-        return new class ($this->base) extends NarrationJobStore {
-            private string $root;
-
-            public function __construct(string $root)
-            {
-                $this->root = $root;
-            }
-
-            protected function baseDirectory(): string
-            {
-                return $this->root;
-            }
-        };
-    }
-
     public function testAnArticleIsNarratedThroughTheQueueAsOneJoinedFile(): void
     {
-        $store = $this->createStore();
+        $store = $this->createNarrationStore();
         $queue = new WpCronNarrationQueue();
         $registry = $this->registry;
 
@@ -227,7 +195,7 @@ class AsyncNarrationIntegrationTest extends TestCase
 
     public function testTheJobDirectoryIsCleanedUpAfterwards(): void
     {
-        $store = $this->createStore();
+        $store = $this->createNarrationStore();
         $queue = new WpCronNarrationQueue();
         $registry = $this->registry;
 

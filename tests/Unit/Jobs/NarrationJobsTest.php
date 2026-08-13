@@ -7,6 +7,8 @@ namespace AiProviderForElevenLabs\Tests\Unit\Jobs;
 use AiProviderForElevenLabs\Jobs\NarrationJobStore;
 use AiProviderForElevenLabs\Jobs\NarrationJobs;
 use AiProviderForElevenLabs\Models\ProviderForElevenLabsTextToSpeechModel;
+use AiProviderForElevenLabs\Tests\Support\MockNarrationJobStore;
+use AiProviderForElevenLabs\Tests\Support\TemporaryNarrationDirectory;
 use PHPUnit\Framework\TestCase;
 use WordPress\AiClient\Common\Exception\InvalidArgumentException;
 
@@ -21,7 +23,7 @@ use WordPress\AiClient\Common\Exception\InvalidArgumentException;
  */
 class NarrationJobsTest extends TestCase
 {
-    private string $base;
+    use TemporaryNarrationDirectory;
 
     private MockNarrationJobStore $store;
 
@@ -31,24 +33,13 @@ class NarrationJobsTest extends TestCase
     {
         parent::setUp();
 
-        $this->base = sys_get_temp_dir() . '/narration-jobs-test-' . bin2hex(random_bytes(6));
-        $this->store = new MockNarrationJobStore($this->base);
+        $this->store = $this->createNarrationStore();
         $this->queue = new MockWpCronNarrationQueue();
     }
 
     protected function tearDown(): void
     {
-        if (is_dir($this->base)) {
-            foreach ((array) glob($this->base . '/*') as $directory) {
-                if (is_dir((string) $directory)) {
-                    foreach ((array) glob($directory . '/*') as $file) {
-                        unlink((string) $file);
-                    }
-                    rmdir((string) $directory);
-                }
-            }
-            rmdir($this->base);
-        }
+        $this->removeNarrationDirectory();
 
         parent::tearDown();
     }
