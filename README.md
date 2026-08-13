@@ -22,7 +22,13 @@ The ElevenLabs name and logo are trademarks of ElevenLabs.
 ## Requirements
 
 - PHP 7.4 or higher
-- [wordpress/php-ai-client](https://github.com/WordPress/php-ai-client) ^1.2 must be installed
+- The [PHP AI Client](https://github.com/WordPress/php-ai-client) SDK, ^1.2, must be loadable:
+    - **WordPress 7.0 and later** bundle it in core (`wp-includes/php-ai-client/`). Nothing to install.
+    - **Earlier WordPress** does not. The SDK is a Composer package, not a plugin -- there is
+      nothing to install from the plugin directory -- so it has to be provided by something
+      else on the site that requires `wordpress/php-ai-client`.
+
+If the SDK is not available, this plugin registers nothing and stays inert.
 
 ## Installation
 
@@ -38,7 +44,7 @@ The Composer distribution is intended for library usage and excludes `plugin.php
 
 1. Download `ai-provider-for-elevenlabs.zip` from [GitHub Releases](https://github.com/whyisjake/ai-provider-for-elevenlabs/releases) (do not use GitHub "Source code" archives)
 2. Upload the ZIP in WordPress admin via Plugins > Add New Plugin > Upload Plugin
-3. Ensure the PHP AI Client plugin is installed and activated
+3. Ensure the PHP AI Client SDK is available (bundled in WordPress 7.0+; see Requirements)
 4. Activate the plugin through the WordPress admin
 
 ## Configuration
@@ -287,8 +293,17 @@ npx @wordpress/env start
 ```
 
 This boots current WordPress with the plugin mounted and activated, at
-<http://localhost:8890> (admin/password). WordPress 7.0 ships the PHP AI Client
-in core, so no companion plugin is required.
+<http://localhost:8890> (admin/password).
+
+`.wp-env.json` deliberately lists no companion plugin for the PHP AI Client.
+It cannot: the client is a Composer package with no `Plugin Name:` header, so
+WordPress has nothing to activate. It arrives with core instead, at
+`wp-includes/php-ai-client/`, which is why `"core": null` (latest stable) is the
+dependency here. Confirm what the environment actually has with:
+
+```bash
+npx @wordpress/env run cli wp eval 'echo WordPress\AiClient\AiClient::VERSION;'
+```
 
 The ports are pinned to 8890/8891 rather than wp-env's 8888/8889 defaults, so
 this environment can run alongside other wp-env projects without colliding.

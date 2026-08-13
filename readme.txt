@@ -33,12 +33,12 @@ This is a fork of [ai-provider-for-elevenlabs](https://github.com/saarnilauri/ai
 **Requirements:**
 
 * PHP 7.4 or higher
-* PHP AI Client plugin must be installed and activated
+* The PHP AI Client SDK. WordPress 7.0 and later bundle it in core, so there is nothing to install. On earlier WordPress it must be provided by something else on the site, as it is a Composer package rather than a plugin.
 * ElevenLabs API key
 
 == Installation ==
 
-1. Ensure the PHP AI Client plugin is installed and activated
+1. Ensure the PHP AI Client SDK is available (bundled in WordPress 7.0 and later)
 2. Upload the plugin files to `/wp-content/plugins/ai-provider-for-elevenlabs/`
 3. Activate the plugin through the 'Plugins' menu in WordPress
 4. Configure your ElevenLabs API key via the `ELEVENLABS_API_KEY` environment variable or constant
@@ -51,7 +51,7 @@ Visit [https://elevenlabs.io/app/settings/api-keys](https://elevenlabs.io/app/se
 
 = Does this plugin work without the PHP AI Client? =
 
-No, this plugin requires the PHP AI Client plugin to be installed and activated. It provides the ElevenLabs-specific implementation that the PHP AI Client uses.
+No. This plugin provides the ElevenLabs-specific implementation that the PHP AI Client uses, so the client has to be present. WordPress 7.0 and later bundle it in core, so on a current WordPress there is nothing extra to install. Note that the client is a Composer package, not a plugin, so there is nothing to install from the plugin directory on older WordPress. Without it, this plugin registers nothing and stays inert.
 
 = How do I specify which voice to use? =
 
