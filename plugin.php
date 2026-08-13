@@ -38,7 +38,7 @@ if (!defined('ABSPATH')) {
  * Since this plugin may be installed without Composer, classes
  * are loaded manually instead of relying on an autoloader.
  *
- * Load order: Metadata → Voices → Models → Provider
+ * Load order: Metadata → Voices → Text → Models → Provider
  *
  * @since 0.1.0
  *
@@ -50,6 +50,7 @@ function load_classes(): void
 
     require_once $plugin_dir . '/Metadata/ProviderForElevenLabsModelMetadataDirectory.php';
     require_once $plugin_dir . '/Voices/VoiceDirectory.php';
+    require_once $plugin_dir . '/Text/TextChunker.php';
     require_once $plugin_dir . '/Models/ProviderForElevenLabsTextToSpeechModel.php';
     require_once $plugin_dir . '/Models/ProviderForElevenLabsSoundGenerationModel.php';
     require_once $plugin_dir . '/Provider/ElevenLabsApiKeyAuthentication.php';
