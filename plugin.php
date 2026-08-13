@@ -54,6 +54,8 @@ function load_classes(): void
     require_once $plugin_dir . '/Models/ProviderForElevenLabsTextToSpeechModel.php';
     require_once $plugin_dir . '/Models/ProviderForElevenLabsSoundGenerationModel.php';
     require_once $plugin_dir . '/Jobs/NarrationJobStore.php';
+    require_once $plugin_dir . '/Jobs/NarrationQueue.php';
+    require_once $plugin_dir . '/Jobs/WpCronNarrationQueue.php';
     require_once $plugin_dir . '/Provider/ElevenLabsApiKeyAuthentication.php';
     require_once $plugin_dir . '/Provider/ElevenLabsProviderAvailability.php';
     require_once $plugin_dir . '/Provider/ProviderForElevenLabs.php';
