@@ -7,6 +7,9 @@
 .codex
 .shotgun
 
+# Planning documents are local working artifacts, not repo content.
+/docs/plans/
+
 .env
 
 # Holds a live ELEVENLABS_API_KEY. The .example file is the committed template.

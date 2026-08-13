@@ -5,6 +5,7 @@
 /composer.json
 /composer.lock
 /Makefile
+/docs
 /phpcs.xml.dist
 /phpstan.neon.dist
 /phpunit.xml.dist
