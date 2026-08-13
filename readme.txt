@@ -3,8 +3,8 @@ Contributors: whyisjake
 Tags: ai, elevenlabs, text-to-speech, tts, sound-effects
 Requires at least: 6.9
 Tested up to: 7.0
-Stable tag: 0.3.0
-Requires PHP: 7.4
+Stable tag: 0.4.0
+Requires PHP: 8.1
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -21,6 +21,7 @@ This is a fork of [ai-provider-for-elevenlabs](https://github.com/saarnilauri/ai
 
 * Text-to-speech conversion with high-quality ElevenLabs voices
 * Automatic voice selection, so a prompt works without configuring a voice ID first
+* Long-form narration, splitting text beyond the model's per-request limit and returning one audio file
 * Sound effects generation from text descriptions
 * Voice directory for discovering available voices, including cloned voices, cached per API key
 * Dynamic model discovery from the ElevenLabs API
@@ -33,7 +34,7 @@ This is a fork of [ai-provider-for-elevenlabs](https://github.com/saarnilauri/ai
 
 **Requirements:**
 
-* PHP 7.4 or higher
+* PHP 8.1 or higher. WordPress itself allows 7.4, but classifies it as insecure and unsupported, and 7.4 has had no security support since November 2022.
 * The PHP AI Client SDK. WordPress 7.0 and later bundle it in core, so there is nothing to install. On earlier WordPress it must be provided by something else on the site, as it is a Composer package rather than a plugin.
 * ElevenLabs API key
 
@@ -66,11 +67,38 @@ No. The [AI plugin](https://wordpress.org/plugins/ai) treats a connector as vali
 
 The ElevenLabs connector is still working for what it does. To clear the warning, configure a text-generation connector such as Anthropic, OpenAI, or Google alongside it.
 
+= Can it narrate a whole post? =
+
+Yes, but check the timing first. ElevenLabs limits characters per request, so longer text is split on paragraph and sentence boundaries, narrated across several requests, and returned as one audio file.
+
+Narration is slow. In a measured example, 16,799 characters produced 18 MB of audio in 37 seconds, which is longer than PHP's default `max_execution_time` of 30 seconds. Most of that is synthesis rather than splitting overhead. For post-length text, either raise `max_execution_time` and `WP_MEMORY_LIMIT`, or run narration from WP-CLI or a background job rather than during a page request.
+
+Each chunk is a separate billed request, so a long post costs proportionally more.
+
+Splitting also needs an output format that can be joined. MP3 and the raw PCM and u-law formats can be. Opus is carried in an Ogg container and cannot, and AAC is excluded until confirmed otherwise. Asking for one of those with over-long text fails immediately rather than returning broken audio. Short text works in every format.
+
+= Can I pass ElevenLabs parameters the AI Client does not expose? =
+
+Yes, through `customOptions`. Parameters such as `language_code`, `seed`, `apply_text_normalization`, and `pronunciation_dictionary_locators` are sent to the API. Voice settings (`stability`, `similarity_boost`, `style`, `use_speaker_boost`, `speed`) are nested under `voice_settings` automatically.
+
+An option that collides with something the provider sets is rejected rather than silently overriding it. `previous_text` and `next_text` are reserved, since the provider uses them to keep long-form narration continuous.
+
 = What audio formats are supported? =
 
 The default output format is MP3 (mp3_44100_128). Other supported formats include PCM, ulaw, Opus, and AAC at various sample rates and bitrates.
 
 == Changelog ==
+
+= 0.4.0 =
+* **Breaking:** raise the minimum PHP version to 8.1. WordPress core still allows 7.4, but reports it as insecure and unsupported and recommends 8.3, and 7.4 has had no security support since November 2022. Sites on PHP below 8.1 will not be offered this update
+* Narrate text longer than the model's per-request limit. It is split on paragraph and sentence boundaries, narrated across several requests that carry neighbouring text so the seams are not abrupt, and returned as a single audio file. Previously this failed with an API error
+* Note that long-form narration is slow: 16,799 characters took 37 seconds in testing, longer than PHP's default max_execution_time. See the FAQ before using it during a page request
+* Refuse to split when the output format cannot be joined, such as Opus, rather than returning audio that is subtly broken. The check happens before any request is billed
+* Honour custom options in both models. They were advertised but only a handful were read, so `language_code`, `seed`, `apply_text_normalization` and `pronunciation_dictionary_locators` were silently discarded
+* Add `speed` as a voice setting
+* Reject a custom option that collides with a parameter the provider sets, instead of letting it override `text` or `model_id`
+* Read each model's character limit from the API instead of ignoring it
+* Add `eleven_v3` to the offline model list, where it was missing
 
 = 0.3.0 =
 * First release of the fork maintained by Jake Spurlock, continuing from 0.2.0 by Lauri Saarni

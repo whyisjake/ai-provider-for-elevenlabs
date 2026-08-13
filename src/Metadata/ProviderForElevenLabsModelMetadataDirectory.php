@@ -27,7 +27,8 @@ use WordPress\AiClient\Providers\OpenAiCompatibleImplementation\AbstractOpenAiCo
  *     name?: string|null,
  *     can_do_text_to_speech?: bool,
  *     can_do_voice_conversion?: bool,
- *     can_be_finetuned?: bool
+ *     can_be_finetuned?: bool,
+ *     maximum_text_length_per_request?: int|null
  * }
  * @phpstan-type ModelsResponseData list<ModelData>
  */
@@ -73,6 +74,7 @@ class ProviderForElevenLabsModelMetadataDirectory extends AbstractOpenAiCompatib
      * @var array<string, string> Model ID => display name.
      */
     private const FALLBACK_MODELS = [
+        'eleven_v3'              => 'v3',
         'eleven_flash_v2'        => 'Flash v2',
         'eleven_flash_v2_5'      => 'Flash v2.5',
         'eleven_monolingual_v1'  => 'English v1',
@@ -81,6 +83,68 @@ class ProviderForElevenLabsModelMetadataDirectory extends AbstractOpenAiCompatib
         'eleven_turbo_v2'        => 'Turbo v2',
         'eleven_turbo_v2_5'      => 'Turbo v2.5',
     ];
+
+    /**
+     * Maximum characters accepted per text-to-speech request, by model.
+     *
+     * The limit varies sharply by model and the API reports it as
+     * `maximum_text_length_per_request`, so these values seed the lookup and are
+     * overwritten by a live `/models` response whenever one is available. They
+     * exist so that a provider which has not listed models still chunks against
+     * a real limit instead of the pessimistic default.
+     *
+     * Values were read from a live `/v1/models` response. `eleven_monolingual_v1`
+     * and `eleven_multilingual_v1` are absent deliberately: the API no longer
+     * returns them, so no measured value exists and they fall through to
+     * {@see self::DEFAULT_MAX_TEXT_LENGTH} rather than carrying an invented number.
+     *
+     * @since n.e.x.t
+     *
+     * @var array<string, int> Model ID => maximum characters per request.
+     */
+    private const MODEL_TEXT_LIMITS = [
+        'eleven_v3'              => 5000,
+        'eleven_multilingual_v2' => 10000,
+        'eleven_turbo_v2'        => 30000,
+        'eleven_flash_v2'        => 30000,
+        'eleven_turbo_v2_5'      => 40000,
+        'eleven_flash_v2_5'      => 40000,
+    ];
+
+    /**
+     * Character limit assumed for a model with no known limit.
+     *
+     * Set to the smallest limit observed across real models, so an unknown or
+     * newly released model is chunked more finely than necessary rather than
+     * having an over-long request rejected by the API.
+     *
+     * @since n.e.x.t
+     *
+     * @var int
+     */
+    public const DEFAULT_MAX_TEXT_LENGTH = 5000;
+
+    /**
+     * Per-model character limits, seeded from constants and refreshed from the API.
+     *
+     * @since n.e.x.t
+     *
+     * @var array<string, int>
+     */
+    private array $textLimits = self::MODEL_TEXT_LIMITS;
+
+    /**
+     * Returns the maximum characters accepted in one request for a model.
+     *
+     * @since n.e.x.t
+     *
+     * @param string $modelId The model identifier.
+     * @return int The character limit, or the conservative default when unknown.
+     */
+    public function getMaxTextLength(string $modelId): int
+    {
+        return $this->textLimits[$modelId] ?? self::DEFAULT_MAX_TEXT_LENGTH;
+    }
 
     /**
      * {@inheritDoc}
@@ -206,9 +270,22 @@ class ProviderForElevenLabsModelMetadataDirectory extends AbstractOpenAiCompatib
 
         $models = array_values(
             array_map(
-                static function (array $modelData) use ($ttsOptions): ModelMetadata {
+                function (array $modelData) use ($ttsOptions): ModelMetadata {
                     $modelId = $modelData['model_id'];
                     $modelName = $modelData['name'] ?? $modelId;
+
+                    /*
+                     * The API is authoritative on the per-request character limit, so a live
+                     * value replaces the seeded constant. ModelMetadata has nowhere to carry
+                     * it, hence the separate lookup.
+                     */
+                    if (
+                        isset($modelData['maximum_text_length_per_request'])
+                        && is_int($modelData['maximum_text_length_per_request'])
+                        && $modelData['maximum_text_length_per_request'] > 0
+                    ) {
+                        $this->textLimits[$modelId] = $modelData['maximum_text_length_per_request'];
+                    }
 
                     return new ModelMetadata(
                         $modelId,

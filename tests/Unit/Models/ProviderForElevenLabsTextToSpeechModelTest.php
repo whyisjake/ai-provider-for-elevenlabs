@@ -17,6 +17,7 @@ use WordPress\AiClient\Providers\Http\DTO\Request;
 use WordPress\AiClient\Providers\Http\DTO\Response;
 use WordPress\AiClient\Providers\Http\Exception\ClientException;
 use WordPress\AiClient\Providers\Http\Exception\ResponseException;
+use WordPress\AiClient\Providers\Http\Exception\ServerException;
 use WordPress\AiClient\Providers\Models\DTO\ModelConfig;
 use WordPress\AiClient\Providers\Models\DTO\ModelMetadata;
 use WordPress\AiClient\Results\DTO\GenerativeAiResult;
@@ -538,5 +539,351 @@ class ProviderForElevenLabsTextToSpeechModelTest extends TestCase
         $file = $result->getCandidates()[0]->getMessage()->getParts()[0]->getFile();
         $this->assertInstanceOf(File::class, $file);
         $this->assertTrue($file->isAudio());
+    }
+
+    // ------------------------------------------------------------------
+    // Custom options
+    // ------------------------------------------------------------------
+
+    /**
+     * Sends one request with the given config and returns its decoded body.
+     *
+     * @param ModelConfig $config The model configuration to use.
+     * @return array<string, mixed> The decoded request body.
+     */
+    private function captureRequestBody(ModelConfig $config): array
+    {
+        $captured = null;
+
+        $this->mockRequestAuthentication->method('authenticateRequest')->willReturnArgument(0);
+        $this->mockHttpTransporter
+            ->method('send')
+            ->willReturnCallback(static function (Request $request) use (&$captured): Response {
+                if ($captured === null) {
+                    $captured = $request->getData();
+                }
+                return new Response(200, ['Content-Type' => ['audio/mpeg']], 'audio-data');
+            });
+
+        $this->createModel($config)->convertTextToSpeechResult($this->createPrompt());
+
+        return (array) $captured;
+    }
+
+    public function testUnrecognisedCustomOptionsReachTheRequestBody(): void
+    {
+        $body = $this->captureRequestBody($this->createConfig('v1', [
+            'language_code'            => 'de',
+            'seed'                     => 12345,
+            'apply_text_normalization' => 'on',
+        ]));
+
+        $this->assertSame('de', $body['language_code']);
+        $this->assertSame(12345, $body['seed']);
+        $this->assertSame('on', $body['apply_text_normalization']);
+    }
+
+    public function testSpeedIsSentInsideVoiceSettings(): void
+    {
+        $body = $this->captureRequestBody($this->createConfig('v1', ['speed' => 1.15]));
+
+        $this->assertSame(1.15, $body['voice_settings']['speed']);
+        $this->assertArrayNotHasKey('speed', $body);
+    }
+
+    public function testSpeedIsAbsentWhenNotRequested(): void
+    {
+        $body = $this->captureRequestBody($this->createConfig('v1'));
+
+        $this->assertArrayNotHasKey('speed', $body['voice_settings']);
+    }
+
+    public function testVoiceSettingsAndTopLevelOptionsAreRoutedSeparately(): void
+    {
+        $body = $this->captureRequestBody($this->createConfig('v1', [
+            'stability'     => 0.9,
+            'language_code' => 'fr',
+        ]));
+
+        $this->assertSame(0.9, $body['voice_settings']['stability']);
+        $this->assertArrayNotHasKey('stability', $body);
+        $this->assertSame('fr', $body['language_code']);
+        $this->assertArrayNotHasKey('language_code', $body['voice_settings']);
+    }
+
+    public function testRequestBodyIsUnchangedWhenNoCustomOptionsAreSet(): void
+    {
+        $body = $this->captureRequestBody($this->createConfig('v1'));
+
+        $this->assertSame(
+            ['text', 'model_id', 'voice_settings', 'output_format'],
+            array_keys($body)
+        );
+    }
+
+    /**
+     * @dataProvider reservedParameterProvider
+     */
+    public function testCustomOptionCollidingWithAProviderParameterThrows(string $reservedKey): void
+    {
+        $this->mockRequestAuthentication->method('authenticateRequest')->willReturnArgument(0);
+        $this->mockHttpTransporter->method('send')
+            ->willReturn(new Response(200, [], 'audio-data'));
+
+        $model = $this->createModel($this->createConfig('v1', [$reservedKey => 'hijacked']));
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage($reservedKey);
+        $model->convertTextToSpeechResult($this->createPrompt());
+    }
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function reservedParameterProvider(): array
+    {
+        return [
+            'text'           => ['text'],
+            'model_id'       => ['model_id'],
+            'voice_settings' => ['voice_settings'],
+        ];
+    }
+
+    /**
+     * @dataProvider providerManagedParameterProvider
+     */
+    public function testContinuityParametersAreRejectedRegardlessOfTextLength(string $key): void
+    {
+        $this->mockRequestAuthentication->method('authenticateRequest')->willReturnArgument(0);
+        $this->mockHttpTransporter->method('send')
+            ->willReturn(new Response(200, [], 'audio-data'));
+
+        $model = $this->createModel($this->createConfig('v1', [$key => 'context']));
+
+        // Short text is the case that would otherwise slip through, since nothing
+        // is chunked and no collision occurs.
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage($key);
+        $model->convertTextToSpeechResult($this->createPrompt('Short.'));
+    }
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function providerManagedParameterProvider(): array
+    {
+        return [
+            'previous_text' => ['previous_text'],
+            'next_text'     => ['next_text'],
+        ];
+    }
+
+    // ------------------------------------------------------------------
+    // Long-form narration
+    // ------------------------------------------------------------------
+
+    /**
+     * Captures every request body sent, returning distinct audio per call.
+     *
+     * @param list<array<string, mixed>> $bodies Populated with each decoded request body.
+     * @return void
+     */
+    private function captureAllRequestBodies(array &$bodies): void
+    {
+        $bodies = [];
+        $counter = 0;
+
+        $this->mockRequestAuthentication->method('authenticateRequest')->willReturnArgument(0);
+        $this->mockHttpTransporter
+            ->method('send')
+            ->willReturnCallback(
+                static function (Request $request) use (&$bodies, &$counter): Response {
+                    $bodies[] = (array) $request->getData();
+                    $counter++;
+                    return new Response(200, ['Content-Type' => ['audio/mpeg']], 'audio-' . $counter . '|');
+                }
+            );
+    }
+
+    /**
+     * Builds text guaranteed to exceed the model's limit.
+     */
+    private function longText(int $sentences = 4000): string
+    {
+        return trim(str_repeat('This is a sentence of moderate length. ', $sentences));
+    }
+
+    public function testTextWithinTheLimitStillIssuesExactlyOneRequest(): void
+    {
+        $bodies = [];
+        $this->captureAllRequestBodies($bodies);
+
+        $this->createModel($this->createConfig('v1'))
+            ->convertTextToSpeechResult($this->createPrompt('Short enough.'));
+
+        $this->assertCount(1, $bodies);
+        $this->assertArrayNotHasKey('previous_text', $bodies[0]);
+        $this->assertArrayNotHasKey('next_text', $bodies[0]);
+    }
+
+    public function testLongTextIsNarratedAcrossSeveralRequests(): void
+    {
+        $bodies = [];
+        $this->captureAllRequestBodies($bodies);
+
+        $this->createModel($this->createConfig('v1'))
+            ->convertTextToSpeechResult($this->createPrompt($this->longText()));
+
+        $this->assertGreaterThan(1, count($bodies));
+    }
+
+    public function testChunkTextRejoinsToTheOriginalPrompt(): void
+    {
+        $bodies = [];
+        $this->captureAllRequestBodies($bodies);
+
+        $text = $this->longText();
+        $this->createModel($this->createConfig('v1'))
+            ->convertTextToSpeechResult($this->createPrompt($text));
+
+        $rejoined = implode('', array_column($bodies, 'text'));
+        $this->assertSame($text, $rejoined, 'Narrated text did not match the prompt.');
+    }
+
+    public function testEveryChunkStaysWithinTheModelLimit(): void
+    {
+        $bodies = [];
+        $this->captureAllRequestBodies($bodies);
+
+        $this->createModel($this->createConfig('v1'))
+            ->convertTextToSpeechResult($this->createPrompt($this->longText()));
+
+        // The stubbed model is eleven_multilingual_v2, whose measured limit is 10,000.
+        foreach ($bodies as $body) {
+            $this->assertLessThanOrEqual(10000, mb_strlen((string) $body['text']));
+        }
+
+        $this->assertGreaterThan(1, count($bodies), 'The text should have been split.');
+    }
+
+    public function testContinuityParametersBracketTheChunks(): void
+    {
+        $bodies = [];
+        $this->captureAllRequestBodies($bodies);
+
+        $this->createModel($this->createConfig('v1'))
+            ->convertTextToSpeechResult($this->createPrompt($this->longText()));
+
+        $last = count($bodies) - 1;
+
+        $this->assertArrayNotHasKey('previous_text', $bodies[0]);
+        $this->assertArrayHasKey('next_text', $bodies[0]);
+        $this->assertArrayHasKey('previous_text', $bodies[$last]);
+        $this->assertArrayNotHasKey('next_text', $bodies[$last]);
+
+        // Each chunk's previous_text is genuinely the preceding chunk.
+        for ($i = 1; $i <= $last; $i++) {
+            $this->assertSame($bodies[$i - 1]['text'], $bodies[$i]['previous_text']);
+        }
+    }
+
+    public function testReturnedAudioIsTheChunkResponsesInOrder(): void
+    {
+        $bodies = [];
+        $this->captureAllRequestBodies($bodies);
+
+        $result = $this->createModel($this->createConfig('v1'))
+            ->convertTextToSpeechResult($this->createPrompt($this->longText()));
+
+        $file = $result->getCandidates()[0]->getMessage()->getParts()[0]->getFile();
+        $this->assertInstanceOf(File::class, $file);
+
+        $expected = '';
+        for ($i = 1; $i <= count($bodies); $i++) {
+            $expected .= 'audio-' . $i . '|';
+        }
+
+        $this->assertSame($expected, base64_decode((string) $file->getBase64Data()));
+    }
+
+    public function testResultIsASingleCandidateNotOnePerChunk(): void
+    {
+        $bodies = [];
+        $this->captureAllRequestBodies($bodies);
+
+        $result = $this->createModel($this->createConfig('v1'))
+            ->convertTextToSpeechResult($this->createPrompt($this->longText()));
+
+        // toFile() reads candidates[0], so more than one candidate would hand the
+        // caller only the first chunk while appearing successful.
+        $this->assertCount(1, $result->getCandidates());
+    }
+
+    public function testUnjoinableFormatRaisesBeforeAnyRequestIsSent(): void
+    {
+        $bodies = [];
+        $this->captureAllRequestBodies($bodies);
+
+        $config = $this->createConfig('v1', [], 'audio/ogg');
+        $model = $this->createModel($config);
+
+        try {
+            $model->convertTextToSpeechResult($this->createPrompt($this->longText()));
+            $this->fail('Expected an unjoinable output format to be rejected.');
+        } catch (InvalidArgumentException $e) {
+            $this->assertStringContainsString('opus', $e->getMessage());
+        }
+
+        $this->assertCount(0, $bodies, 'No credits should be spent on audio that cannot be joined.');
+    }
+
+    public function testUnjoinableFormatIsStillFineForShortText(): void
+    {
+        $bodies = [];
+        $this->captureAllRequestBodies($bodies);
+
+        $this->createModel($this->createConfig('v1', [], 'audio/ogg'))
+            ->convertTextToSpeechResult($this->createPrompt('Short enough.'));
+
+        $this->assertCount(1, $bodies);
+    }
+
+    public function testFailurePartwayThroughDoesNotReturnTruncatedAudio(): void
+    {
+        $calls = 0;
+
+        $this->mockRequestAuthentication->method('authenticateRequest')->willReturnArgument(0);
+        $this->mockHttpTransporter
+            ->method('send')
+            ->willReturnCallback(static function () use (&$calls): Response {
+                $calls++;
+                if ($calls >= 2) {
+                    return new Response(500, [], '{"detail":"boom"}');
+                }
+                return new Response(200, ['Content-Type' => ['audio/mpeg']], 'audio');
+            });
+
+        $model = $this->createModel($this->createConfig('v1'));
+
+        $this->expectException(ServerException::class);
+        $model->convertTextToSpeechResult($this->createPrompt($this->longText()));
+    }
+
+    public function testEmptyBodyOnALaterChunkRaises(): void
+    {
+        $calls = 0;
+
+        $this->mockRequestAuthentication->method('authenticateRequest')->willReturnArgument(0);
+        $this->mockHttpTransporter
+            ->method('send')
+            ->willReturnCallback(static function () use (&$calls): Response {
+                $calls++;
+                return new Response(200, ['Content-Type' => ['audio/mpeg']], $calls >= 2 ? '' : 'audio');
+            });
+
+        $model = $this->createModel($this->createConfig('v1'));
+
+        $this->expectException(ResponseException::class);
+        $model->convertTextToSpeechResult($this->createPrompt($this->longText()));
     }
 }
