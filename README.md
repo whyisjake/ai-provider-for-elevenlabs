@@ -10,14 +10,46 @@ The ElevenLabs name and logo are trademarks of ElevenLabs.
 > Forked from [saarnilauri/ai-provider-for-elevenlabs](https://github.com/saarnilauri/ai-provider-for-elevenlabs)
 > by [Lauri Saarni](https://profiles.wordpress.org/laurisaarni/), used under GPL-2.0-or-later.
 > Maintained here by [Jake Spurlock](https://profiles.wordpress.org/whyisjake/).
+> See [Differences from upstream](#differences-from-upstream).
 
 ## Features
 
 - **Text-to-Speech** -- high-quality voice synthesis with many voices and models
+- **Automatic voice selection** -- a prompt works without configuring a voice ID first
 - **Sound Effects Generation** -- generate sound effects from text prompts
-- **Voice Directory** -- list and discover available voices (including cloned voices)
+- **Voice Directory** -- list and discover available voices, including cloned voices, cached per API key
 - Automatic provider registration in WordPress
 - Dynamic model discovery from the ElevenLabs API
+
+## Differences from upstream
+
+This fork starts from [upstream](https://github.com/saarnilauri/ai-provider-for-elevenlabs) 0.2.0.
+The changes are fixes and verification rather than new capability -- the feature set is the same
+one Lauri built.
+
+Behaviour you would notice:
+
+| | Upstream 0.2.0 | Here |
+|---|---|---|
+| Prompt with no `outputSpeechVoice` | Throws | Picks a voice from your account, preferring premade |
+| Voice listing endpoint | `/v1/voices`, deprecated and capped at 500 voices | `/v2/voices`, every page fetched |
+| Repeated voice lookups | One HTTP request each | Memoised per request, cached per API key |
+| Voice directory built before credentials arrive | Stays broken for the rest of the request | Picks credentials up when they arrive |
+| Provider shown in the connector UI as | "AI Provider for ElevenLabs", no description or logo | "ElevenLabs", with description and logo |
+| A local `.env` when building the ZIP | Packaged into the release archive | Excluded, and CI fails if that regresses |
+
+Project changes:
+
+- Continuous integration: unit tests on PHP 7.4 through 8.4, phpcs, PHPStan at `max`, and a
+  packaging job that plants canary secrets and fails if any reach the release ZIP
+- Unit tests 46 to 59, integration tests 10 to 12, covering pagination, voice resolution, and the
+  credentials-arrive-late regression
+- `wp-env` environment, plus `.env` and override templates, for the WordPress-only paths that
+  PHPUnit cannot reach
+- PSR-4 autoloading fixed for the test suite, which previously skipped every test class
+- The GPL-2.0 licence text, which was declared but not included
+
+Most of this would be just as useful upstream, and none of it is a deliberate divergence.
 
 ## Requirements
 

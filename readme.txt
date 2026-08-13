@@ -20,8 +20,9 @@ This is a fork of [ai-provider-for-elevenlabs](https://github.com/saarnilauri/ai
 **Features:**
 
 * Text-to-speech conversion with high-quality ElevenLabs voices
+* Automatic voice selection, so a prompt works without configuring a voice ID first
 * Sound effects generation from text descriptions
-* Voice directory for discovering available voices (including cloned voices)
+* Voice directory for discovering available voices, including cloned voices, cached per API key
 * Dynamic model discovery from the ElevenLabs API
 * Automatic provider registration
 
