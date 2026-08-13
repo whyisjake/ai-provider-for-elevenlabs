@@ -289,6 +289,9 @@ in core, so no companion plugin is required.
 
 The ports are pinned to 8890/8891 rather than wp-env's 8888/8889 defaults, so
 this environment can run alongside other wp-env projects without colliding.
+`testsPort` is deprecated upstream and prints a warning, but it is kept
+deliberately: without it the test site falls back to 8889, and wp-env reports
+that collision while still exiting 0, so the failure is easy to miss.
 
 To make the provider's API key available inside that environment, copy the
 override template -- it defines `ELEVENLABS_API_KEY` as a PHP constant, which the
