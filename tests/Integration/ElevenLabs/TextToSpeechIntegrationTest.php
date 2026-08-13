@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace AiProviderForElevenLabs\Tests\Integration\ElevenLabs;
 
+use AiProviderForElevenLabs\Provider\ElevenLabsApiKeyAuthentication;
+use AiProviderForElevenLabs\Provider\ProviderForElevenLabs;
 use AiProviderForElevenLabs\Tests\Integration\Traits\IntegrationTestTrait;
 use PHPUnit\Framework\TestCase;
 use WordPress\AiClient\AiClient;
@@ -123,6 +125,68 @@ class TextToSpeechIntegrationTest extends TestCase
         $filePath = $this->audioOutputDir . '/tts_low_quality.mp3';
         file_put_contents($filePath, $audioData);
         $this->assertGreaterThan(0, filesize($filePath));
+    }
+
+    /**
+     * Tests that a prompt with no configured voice still produces audio.
+     *
+     * This is the path a caller hits when they simply select the provider and
+     * prompt it. ElevenLabs requires a voice ID in the request path, so the
+     * provider resolves one from the account. Every other test in this file
+     * pins a voice explicitly, so this is the only live coverage of that
+     * resolution -- and the only one that proves the account lookup works
+     * against the real API rather than a mocked voice list.
+     *
+     * Requires the API key to carry the Voices permission.
+     */
+    public function testTtsWithoutConfiguredVoiceUsesAccountDefault(): void
+    {
+        $audio = AiClient::prompt('No voice was configured for this request.', $this->registry)
+            ->usingProvider('elevenlabs')
+            ->convertTextToSpeech();
+
+        $this->assertTrue($audio->isAudio());
+        $this->assertNotEmpty($audio->getBase64Data());
+
+        $audioData = base64_decode($audio->getBase64Data());
+        $this->assertNotEmpty($audioData);
+
+        $filePath = $this->audioOutputDir . '/tts_default_voice.mp3';
+        file_put_contents($filePath, $audioData);
+        $this->assertFileExists($filePath);
+        $this->assertGreaterThan(0, filesize($filePath));
+    }
+
+    /**
+     * Tests that the voice directory reports a default voice for the account.
+     *
+     * Complements the test above: that one proves audio comes back, this one
+     * names the voice that was chosen so a failure distinguishes "no voice
+     * could be resolved" from "synthesis failed".
+     */
+    public function testAccountExposesADefaultVoice(): void
+    {
+        $voiceDirectory = ProviderForElevenLabs::getVoiceDirectory();
+        $voiceDirectory->setRequestAuthentication(
+            new ElevenLabsApiKeyAuthentication((string) ($_ENV['ELEVENLABS_API_KEY'] ?? getenv('ELEVENLABS_API_KEY')))
+        );
+
+        $voices = $voiceDirectory->getVoices();
+        $this->assertNotEmpty($voices, 'The account reported no voices at all.');
+
+        $defaultVoiceId = $voiceDirectory->getDefaultVoiceId();
+        $this->assertNotNull($defaultVoiceId);
+        $this->assertArrayHasKey($defaultVoiceId, $voices);
+
+        fwrite(
+            STDERR,
+            sprintf(
+                "\nResolved default voice: %s (%s), from %d voice(s).\n",
+                $voices[$defaultVoiceId]['name'],
+                $defaultVoiceId,
+                count($voices)
+            )
+        );
     }
 
     /**

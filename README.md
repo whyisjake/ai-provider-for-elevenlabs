@@ -250,16 +250,62 @@ composer test
 composer test:unit
 ```
 
-Run integration tests (requires `ELEVENLABS_API_KEY`):
-
-```bash
-composer test:integration
-```
-
 Run linting:
 
 ```bash
 composer lint
+```
+
+### Integration tests against the live API
+
+The integration suite makes real calls to ElevenLabs and needs an API key. It does
+not need WordPress. Copy the template and fill in your key:
+
+```bash
+cp .env.example .env
+# then edit .env and set ELEVENLABS_API_KEY
+composer test:integration
+```
+
+Individual tests skip themselves when the key is absent, so the suite is safe to
+run without one. `.env` is both gitignored and excluded from the release ZIP.
+
+Generated audio is written to `tests/Integration/audio/` for listening.
+
+### Local WordPress environment
+
+Some behaviour only exists inside WordPress -- provider registration on `init`,
+the Settings > Connectors credential flow, and transient-backed voice caching --
+and no amount of PHPUnit will exercise it. Use [`wp-env`](https://developer.wordpress.org/block-editor/reference-guides/packages/packages-env/)
+(requires Docker):
+
+```bash
+npx @wordpress/env start
+```
+
+This boots current WordPress with the plugin mounted and activated. WordPress 7.0
+ships the PHP AI Client in core, so no companion plugin is required.
+
+To make the provider's API key available inside that environment, copy the
+override template -- it defines `ELEVENLABS_API_KEY` as a PHP constant, which the
+plugin reads:
+
+```bash
+cp .wp-env.override.json.example .wp-env.override.json
+# then edit it and set your key, and restart:
+npx @wordpress/env start
+```
+
+`.wp-env.override.json` is gitignored and excluded from the release ZIP. Do not
+put the key in `.wp-env.json`, which is committed.
+
+Useful commands:
+
+```bash
+npx @wordpress/env run cli wp plugin list     # confirm the plugin is active
+npx @wordpress/env logs                       # tail PHP errors
+npx @wordpress/env stop
+npx @wordpress/env destroy                    # tear down completely
 ```
 
 ## License
