@@ -3,7 +3,7 @@ Contributors: whyisjake
 Tags: ai, elevenlabs, text-to-speech, tts, sound-effects
 Requires at least: 6.9
 Tested up to: 7.0
-Stable tag: 0.4.0
+Stable tag: 0.5.0
 Requires PHP: 8.1
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -22,6 +22,7 @@ This is a fork of [ai-provider-for-elevenlabs](https://github.com/saarnilauri/ai
 * Text-to-speech conversion with high-quality ElevenLabs voices
 * Automatic voice selection, so a prompt works without configuring a voice ID first
 * Long-form narration, splitting text beyond the model's per-request limit and returning one audio file
+* Background narration for post-length text, queued as small jobs so no single request outlives its time limit
 * Sound effects generation from text descriptions
 * Voice directory for discovering available voices, including cloned voices, cached per API key
 * Dynamic model discovery from the ElevenLabs API
@@ -71,11 +72,21 @@ The ElevenLabs connector is still working for what it does. To clear the warning
 
 Yes, but check the timing first. ElevenLabs limits characters per request, so longer text is split on paragraph and sentence boundaries, narrated across several requests, and returned as one audio file.
 
-Narration is slow. In a measured example, 16,799 characters produced 18 MB of audio in 37 seconds, which is longer than PHP's default `max_execution_time` of 30 seconds. Most of that is synthesis rather than splitting overhead. For post-length text, either raise `max_execution_time` and `WP_MEMORY_LIMIT`, or run narration from WP-CLI or a background job rather than during a page request.
+Narration is slow. Synthesis runs at roughly 90 to 95 characters per second, measured across four request sizes: 1,000 characters took 11 seconds, 2,000 took 22, 4,000 took 42, and 8,000 took 84. The relationship is linear, so the time is synthesis itself rather than overhead. Against PHP's default `max_execution_time` of 30 seconds, that caps a synchronous call at roughly 2,500 characters, or about 400 words.
+
+For anything longer, use background narration. It queues the work as small jobs of about a thousand characters each, so no single request has to outlive its time limit, and adds the finished audio to the media library. See the readme on GitHub for the code.
 
 Each chunk is a separate billed request, so a long post costs proportionally more.
 
 Splitting also needs an output format that can be joined. MP3 and the raw PCM and u-law formats can be. Opus is carried in an Ogg container and cannot, and AAC is excluded until confirmed otherwise. Asking for one of those with over-long text fails immediately rather than returning broken audio. Short text works in every format.
+
+= Why has my background narration not finished? =
+
+The default runner is WP-Cron, which only fires when somebody visits the site. On a quiet site a job can sit unfinished for a long time. It is not lost, and it resumes on the next visit.
+
+If you need narration to progress predictably, either set `DISABLE_WP_CRON` and run real system cron, or substitute a proper queue through the `ai_provider_elevenlabs_narration_queue` filter.
+
+A job that genuinely fails records why. Read it with `( new NarrationJobs() )->progress( $job_id )`, or hook `ai_provider_elevenlabs_narration_failed`.
 
 = Can I pass ElevenLabs parameters the AI Client does not expose? =
 
@@ -88,6 +99,17 @@ An option that collides with something the provider sets is rejected rather than
 The default output format is MP3 (mp3_44100_128). Other supported formats include PCM, ulaw, Opus, and AAC at various sample rates and bitrates.
 
 == Changelog ==
+
+= 0.5.0 =
+* Narrate post-length text in the background. Work is queued as small jobs of about a thousand characters each, so no single request has to outlive its PHP time limit, and the finished audio is added to the media library
+* Add `ai_provider_elevenlabs_narration_complete` and `ai_provider_elevenlabs_narration_failed` actions, and a progress reading for a job in flight
+* Size chunks from measurement rather than assumption. Synthesis runs at roughly 92 characters per second, so a 4,000-character chunk takes 42 seconds and cannot survive a default 30-second limit. The default is 1,000 characters, near eleven seconds
+* Retry a chunk up to three times before failing the job, and sweep hourly for jobs left with work to do but nothing scheduled to do it. WordPress deletes a scheduled event before running it, so a process killed mid-chunk takes the only pending event with it; the sweeper is what recovers those
+* Drop the stored post text once a job finishes, so narrating routinely does not accumulate every post in the options table
+* Fail a job whose audio cannot be added to the media library, and keep the narrated audio on disk rather than deleting work already paid for
+* Let a site substitute its own background runner through the `ai_provider_elevenlabs_narration_queue` filter, and adjust chunk size through `ai_provider_elevenlabs_narration_chunk_size`
+* Store jobs one option per job with autoload disabled, and keep chunk audio on disk rather than in the database
+* Fix a fatal error in installs without Composer: `TextChunker` was never loaded, so long-form narration failed with a missing class. Added a test that fails when any class is left unregistered
 
 = 0.4.0 =
 * **Breaking:** raise the minimum PHP version to 8.1. WordPress core still allows 7.4, but reports it as insecure and unsupported and recommends 8.3, and 7.4 has had no security support since November 2022. Sites on PHP below 8.1 will not be offered this update

@@ -18,6 +18,8 @@ The ElevenLabs name and logo are trademarks of ElevenLabs.
 - **Automatic voice selection** -- a prompt works without configuring a voice ID first
 - **Long-form narration** -- text beyond the model's per-request limit is narrated across
   several requests and returned as one audio file ([caveats](#long-form-narration))
+- **Background narration** -- post-length text narrated as a queue of small jobs, so no
+  single request has to outlive its time limit ([details](#background-narration))
 - **Sound Effects Generation** -- generate sound effects from text prompts
 - **Voice Directory** -- list and discover available voices, including cloned voices, cached per API key
 - Automatic provider registration in WordPress
@@ -178,15 +180,31 @@ still makes exactly one request.
 
 Two constraints are worth knowing before relying on this.
 
-**It is slow, and may exceed your PHP time limit.** Narration is not instant, and
-a long post is several sequential API calls inside one request. A measured
-example: **16,799 characters produced 18 MB of audio in 37 seconds**, against a
-PHP default `max_execution_time` of 30. Most of that is synthesis rather than
-chunking overhead, so a single near-limit request is already slow. For anything
-approaching post length, either raise `max_execution_time` and
-`WP_MEMORY_LIMIT`, or drive narration from WP-CLI or a background job rather than
-a page request. The audio is held in memory before being returned, so memory
-scales with the length of the output.
+**It is slow, and will exceed your PHP time limit.** Narration is not instant, and
+a long post is several sequential API calls inside one request. Synthesis runs at
+roughly **90 to 95 characters per second**, measured across four request sizes:
+
+| Characters | Seconds |
+|---|---|
+| 1,000 | 11.0 |
+| 2,000 | 21.7 |
+| 4,000 | 42.4 |
+| 8,000 | 83.8 |
+
+The relationship is linear, so there is no per-request overhead worth optimising
+away — the time is the synthesis itself. Against a PHP default
+`max_execution_time` of 30 seconds, that puts the ceiling for a synchronous call
+at roughly 2,500 characters, or about 400 words.
+
+An earlier run recorded a faster rate (16,799 characters in 37 seconds), so treat
+these numbers as varying with API load rather than fixed. Planning for the slower
+figure is the safer choice, and the variance is itself an argument for not
+betting a page request on it.
+
+For anything longer than a few hundred words, use
+[background narration](#background-narration). Raising `max_execution_time` and
+`WP_MEMORY_LIMIT` also works, but only on hosts where you control both. The audio
+is held in memory before being returned, so memory scales with output length.
 
 **It costs one request per chunk.** A long post is charged accordingly.
 
@@ -195,6 +213,77 @@ PCM and µ-law formats can be; Opus is carried in an Ogg container and cannot, a
 AAC is excluded until confirmed to be ADTS-framed. Requesting an unjoinable format
 for over-long text fails immediately, before any request is billed, rather than
 returning audio that is subtly broken. Short text is unaffected in every format.
+
+### Background narration
+
+Narrating a full-length post cannot finish inside one PHP request, so it runs as
+a queue of small jobs instead. Each job narrates about a thousand characters —
+around eleven seconds — and schedules the next, so no single request has to
+survive longer than a page load normally would.
+
+```php
+use AiProviderForElevenLabs\Jobs\NarrationJobs;
+
+$jobs  = new NarrationJobs();
+$jobId = $jobs->enqueue( $post_content, [
+    'voice' => 'JBFqnCBsd6RMkjVDRZzb', // optional; resolved from your account otherwise
+] );
+
+// Later, from anywhere:
+$progress = $jobs->progress( $jobId );
+// [ 'status' => 'running', 'completed' => 3, 'total' => 9, 'error' => null, 'attachment_id' => null ]
+```
+
+The finished audio is added to the media library, and the job record carries the
+attachment id. Two actions fire:
+
+```php
+add_action( 'ai_provider_elevenlabs_narration_complete', function ( $job_id, $attachment_id ) {
+    update_post_meta( $post_id, 'narration', $attachment_id );
+}, 10, 2 );
+
+add_action( 'ai_provider_elevenlabs_narration_failed', function ( $job_id, $reason ) {
+    error_log( "Narration {$job_id} failed: {$reason}" );
+}, 10, 2 );
+```
+
+`$jobs->cancel( $jobId )` stops a job and removes its partial audio.
+
+**What WP-Cron does and does not guarantee.** The default runner is WP-Cron,
+which is available everywhere and needs no dependency. Its behaviour is worth
+knowing before you rely on it:
+
+- **It fires on traffic.** Unless your host sets `DISABLE_WP_CRON` and runs real
+  system cron, a queue on a quiet site only advances when somebody visits. A job
+  is not lost, but it can sit unfinished for a long time.
+- **It does not retry.** WordPress deletes a scheduled event before running it,
+  so nothing in core re-drives work whose process died — the event is gone with
+  it. This plugin handles that itself: a chunk is claimed with an expiry, failed
+  chunks are released and retried up to three times, and an hourly sweeper picks
+  up any job left with work to do but nothing scheduled to do it. That sweeper
+  is what covers a request killed outright by a fatal, a timeout, or the OOM
+  killer, where nothing survives to reschedule anything.
+- **It does not extend the time limit.** A cron callback is an ordinary PHP
+  request. That is why the unit of work is one chunk rather than one post.
+
+Sites that run background work properly can substitute their own runner:
+
+```php
+add_filter( 'ai_provider_elevenlabs_narration_queue', function ( $queue ) {
+    return new My_Action_Scheduler_Queue(); // implements NarrationQueue
+} );
+```
+
+Chunk size is filterable, though the default is measured rather than guessed and
+larger values move back towards the timeout:
+
+```php
+add_filter( 'ai_provider_elevenlabs_narration_chunk_size', fn() => 800 );
+```
+
+Jobs are stored one option per job with autoload disabled, and chunk audio is
+written under the uploads directory, never into the database. The job directory
+is removed once the attachment exists.
 
 ### Provider-specific options
 

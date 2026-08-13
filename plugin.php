@@ -6,7 +6,7 @@
  * Description: ElevenLabs text-to-speech provider for the WordPress AI Client.
  * Requires at least: 6.9
  * Requires PHP: 8.1
- * Version: 0.4.0
+ * Version: 0.5.0
  * Author: Jake Spurlock
  * Author URI: https://profiles.wordpress.org/whyisjake/
  * License: GPL-2.0-or-later
@@ -24,6 +24,8 @@ declare(strict_types=1);
 
 namespace AiProviderForElevenLabs;
 
+use AiProviderForElevenLabs\Jobs\NarrationJobs;
+use AiProviderForElevenLabs\Jobs\WpCronNarrationQueue;
 use AiProviderForElevenLabs\Provider\ElevenLabsApiKeyAuthentication;
 use AiProviderForElevenLabs\Provider\ProviderForElevenLabs;
 use WordPress\AiClient\AiClient;
@@ -38,7 +40,7 @@ if (!defined('ABSPATH')) {
  * Since this plugin may be installed without Composer, classes
  * are loaded manually instead of relying on an autoloader.
  *
- * Load order: Metadata → Voices → Text → Models → Provider
+ * Load order: Metadata → Voices → Text → Models → Jobs → Provider
  *
  * @since 0.1.0
  *
@@ -53,6 +55,11 @@ function load_classes(): void
     require_once $plugin_dir . '/Text/TextChunker.php';
     require_once $plugin_dir . '/Models/ProviderForElevenLabsTextToSpeechModel.php';
     require_once $plugin_dir . '/Models/ProviderForElevenLabsSoundGenerationModel.php';
+    require_once $plugin_dir . '/Jobs/NarrationJobStore.php';
+    require_once $plugin_dir . '/Jobs/NarrationQueue.php';
+    require_once $plugin_dir . '/Jobs/WpCronNarrationQueue.php';
+    require_once $plugin_dir . '/Jobs/NarrationJobRunner.php';
+    require_once $plugin_dir . '/Jobs/NarrationJobs.php';
     require_once $plugin_dir . '/Provider/ElevenLabsApiKeyAuthentication.php';
     require_once $plugin_dir . '/Provider/ElevenLabsProviderAvailability.php';
     require_once $plugin_dir . '/Provider/ProviderForElevenLabs.php';
@@ -157,3 +164,77 @@ function restore_elevenlabs_authentication(): void
 // pre-7.0, and after core's _wp_connectors_pass_default_keys_to_ai_client
 // (init 20) on WordPress 7.0+.
 add_action('init', __NAMESPACE__ . '\\restore_elevenlabs_authentication', 21);
+
+/**
+ * Narrates one chunk of a background narration job.
+ *
+ * The callback for the scheduled event. Arguments arrive from the cron array,
+ * so they are cast rather than trusted.
+ *
+ * @since n.e.x.t
+ *
+ * @param mixed $job_id      The job id.
+ * @param mixed $chunk_index The chunk to narrate.
+ * @return void
+ */
+function run_narration_chunk($job_id, $chunk_index): void
+{
+    if (!is_string($job_id) || $job_id === '' || !is_numeric($chunk_index)) {
+        return;
+    }
+
+    /*
+     * Classes are loaded by register_provider(), which returns early when the
+     * AI Client is missing. Queued events outlive a deactivation of that
+     * plugin, so without this the callback fatals on an undefined class.
+     */
+    if (!class_exists(AiClient::class)) {
+        return;
+    }
+
+    load_classes();
+
+    (new NarrationJobs())->runChunk($job_id, (int) $chunk_index);
+}
+
+add_action(WpCronNarrationQueue::HOOK, __NAMESPACE__ . '\\run_narration_chunk', 10, 2);
+
+/**
+ * Re-drives narration jobs that have work left but nothing scheduled.
+ *
+ * A process killed mid-chunk takes its event with it, because WordPress
+ * unschedules an event before running it. The store's claims make the chunk
+ * reclaimable; this is what actually reclaims it.
+ *
+ * @since n.e.x.t
+ *
+ * @return void
+ */
+function sweep_narration_jobs(): void
+{
+    if (!class_exists(AiClient::class)) {
+        return;
+    }
+
+    load_classes();
+
+    (new NarrationJobs())->sweep();
+}
+
+add_action(NarrationJobs::SWEEP_HOOK, __NAMESPACE__ . '\\sweep_narration_jobs');
+
+/**
+ * Ensures the narration sweeper is scheduled.
+ *
+ * @since n.e.x.t
+ *
+ * @return void
+ */
+function schedule_narration_sweep(): void
+{
+    if (wp_next_scheduled(NarrationJobs::SWEEP_HOOK) === false) {
+        wp_schedule_event(time() + HOUR_IN_SECONDS, 'hourly', NarrationJobs::SWEEP_HOOK);
+    }
+}
+
+add_action('init', __NAMESPACE__ . '\\schedule_narration_sweep', 22);
