@@ -539,4 +539,112 @@ class ProviderForElevenLabsTextToSpeechModelTest extends TestCase
         $this->assertInstanceOf(File::class, $file);
         $this->assertTrue($file->isAudio());
     }
+
+    // ------------------------------------------------------------------
+    // Custom options
+    // ------------------------------------------------------------------
+
+    /**
+     * Sends one request with the given config and returns its decoded body.
+     *
+     * @param ModelConfig $config The model configuration to use.
+     * @return array<string, mixed> The decoded request body.
+     */
+    private function captureRequestBody(ModelConfig $config): array
+    {
+        $captured = null;
+
+        $this->mockRequestAuthentication->method('authenticateRequest')->willReturnArgument(0);
+        $this->mockHttpTransporter
+            ->method('send')
+            ->willReturnCallback(static function (Request $request) use (&$captured): Response {
+                if ($captured === null) {
+                    $captured = $request->getData();
+                }
+                return new Response(200, ['Content-Type' => ['audio/mpeg']], 'audio-data');
+            });
+
+        $this->createModel($config)->convertTextToSpeechResult($this->createPrompt());
+
+        return (array) $captured;
+    }
+
+    public function testUnrecognisedCustomOptionsReachTheRequestBody(): void
+    {
+        $body = $this->captureRequestBody($this->createConfig('v1', [
+            'language_code'            => 'de',
+            'seed'                     => 12345,
+            'apply_text_normalization' => 'on',
+        ]));
+
+        $this->assertSame('de', $body['language_code']);
+        $this->assertSame(12345, $body['seed']);
+        $this->assertSame('on', $body['apply_text_normalization']);
+    }
+
+    public function testSpeedIsSentInsideVoiceSettings(): void
+    {
+        $body = $this->captureRequestBody($this->createConfig('v1', ['speed' => 1.15]));
+
+        $this->assertSame(1.15, $body['voice_settings']['speed']);
+        $this->assertArrayNotHasKey('speed', $body);
+    }
+
+    public function testSpeedIsAbsentWhenNotRequested(): void
+    {
+        $body = $this->captureRequestBody($this->createConfig('v1'));
+
+        $this->assertArrayNotHasKey('speed', $body['voice_settings']);
+    }
+
+    public function testVoiceSettingsAndTopLevelOptionsAreRoutedSeparately(): void
+    {
+        $body = $this->captureRequestBody($this->createConfig('v1', [
+            'stability'     => 0.9,
+            'language_code' => 'fr',
+        ]));
+
+        $this->assertSame(0.9, $body['voice_settings']['stability']);
+        $this->assertArrayNotHasKey('stability', $body);
+        $this->assertSame('fr', $body['language_code']);
+        $this->assertArrayNotHasKey('language_code', $body['voice_settings']);
+    }
+
+    public function testRequestBodyIsUnchangedWhenNoCustomOptionsAreSet(): void
+    {
+        $body = $this->captureRequestBody($this->createConfig('v1'));
+
+        $this->assertSame(
+            ['text', 'model_id', 'voice_settings', 'output_format'],
+            array_keys($body)
+        );
+    }
+
+    /**
+     * @dataProvider reservedParameterProvider
+     */
+    public function testCustomOptionCollidingWithAProviderParameterThrows(string $reservedKey): void
+    {
+        $this->mockRequestAuthentication->method('authenticateRequest')->willReturnArgument(0);
+        $this->mockHttpTransporter->method('send')
+            ->willReturn(new Response(200, [], 'audio-data'));
+
+        $model = $this->createModel($this->createConfig('v1', [$reservedKey => 'hijacked']));
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage($reservedKey);
+        $model->convertTextToSpeechResult($this->createPrompt());
+    }
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public function reservedParameterProvider(): array
+    {
+        return [
+            'text'           => ['text'],
+            'model_id'       => ['model_id'],
+            'voice_settings' => ['voice_settings'],
+        ];
+    }
 }

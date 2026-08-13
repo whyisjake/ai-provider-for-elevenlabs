@@ -50,6 +50,26 @@ class ProviderForElevenLabsTextToSpeechModel extends AbstractApiBasedModel imple
     ];
 
     /**
+     * Custom option keys that belong inside `voice_settings` rather than at the
+     * top level of the request body.
+     *
+     * `speed` is accepted but deliberately has no entry in
+     * {@see self::DEFAULT_VOICE_SETTINGS}, so it is sent only when a caller asks
+     * for it rather than pinning a value the API would otherwise choose.
+     *
+     * @since n.e.x.t
+     *
+     * @var list<string>
+     */
+    private const VOICE_SETTING_KEYS = [
+        'stability',
+        'similarity_boost',
+        'style',
+        'use_speaker_boost',
+        'speed',
+    ];
+
+    /**
      * Default output format when no outputMimeType is configured.
      *
      * @since 0.1.0
@@ -111,12 +131,12 @@ class ProviderForElevenLabsTextToSpeechModel extends AbstractApiBasedModel imple
         $outputFormat = $this->resolveOutputFormat();
         $voiceSettings = $this->resolveVoiceSettings();
 
-        $requestData = [
+        $requestData = $this->applyCustomOptions([
             'text'           => $text,
             'model_id'       => $this->metadata()->getId(),
             'voice_settings' => $voiceSettings,
             'output_format'  => $outputFormat,
-        ];
+        ]);
 
         $request = new Request(
             HttpMethodEnum::POST(),
@@ -292,13 +312,50 @@ class ProviderForElevenLabsTextToSpeechModel extends AbstractApiBasedModel imple
         $customOptions = $this->getConfig()->getCustomOptions();
 
         $voiceSettings = self::DEFAULT_VOICE_SETTINGS;
-        foreach (self::DEFAULT_VOICE_SETTINGS as $key => $default) {
+        foreach (self::VOICE_SETTING_KEYS as $key) {
             if (array_key_exists($key, $customOptions)) {
                 $voiceSettings[$key] = $customOptions[$key];
             }
         }
 
         return $voiceSettings;
+    }
+
+    /**
+     * Merges caller-supplied custom options into the request body.
+     *
+     * The model advertises `OptionEnum::customOptions()`, which promises callers
+     * that provider-specific parameters reach the API. Only a handful were
+     * honoured previously and the rest were dropped silently, so options such as
+     * `language_code`, `seed`, and `apply_text_normalization` had no way through.
+     *
+     * Voice settings and `output_format` are excluded here because they are
+     * consumed elsewhere: the former nests under `voice_settings`, the latter
+     * selects the audio encoding.
+     *
+     * @since n.e.x.t
+     *
+     * @param array<string, mixed> $params Request parameters the provider has already set.
+     * @return array<string, mixed> The parameters with custom options merged in.
+     * @throws InvalidArgumentException If a custom option collides with a provider-set parameter.
+     */
+    protected function applyCustomOptions(array $params): array
+    {
+        foreach ($this->getConfig()->getCustomOptions() as $key => $value) {
+            if (in_array($key, self::VOICE_SETTING_KEYS, true) || $key === 'output_format') {
+                continue;
+            }
+
+            if (array_key_exists($key, $params)) {
+                throw new InvalidArgumentException(
+                    sprintf('The custom option "%s" conflicts with a parameter set by the provider.', $key)
+                );
+            }
+
+            $params[$key] = $value;
+        }
+
+        return $params;
     }
 
     /**
