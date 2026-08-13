@@ -295,13 +295,22 @@ npx @wordpress/env start
 This boots current WordPress with the plugin mounted and activated, at
 <http://localhost:8890> (admin/password).
 
-`.wp-env.json` deliberately lists no companion plugin for the PHP AI Client.
-It cannot: the client is a Composer package with no `Plugin Name:` header, so
-WordPress has nothing to activate. It arrives with core instead, at
-`wp-includes/php-ai-client/`, which is why `"core": null` (latest stable) is the
-dependency here. Confirm what the environment actually has with:
+Two AI dependencies are involved, and they arrive differently:
+
+- **The PHP AI Client SDK** is what this provider plugs into. It is a Composer
+  package with no `Plugin Name:` header, so it cannot be installed as a plugin;
+  it ships inside core at `wp-includes/php-ai-client/`. That is why `"core"` is
+  the dependency here rather than anything in `"plugins"`.
+- **The [AI plugin](https://wordpress.org/plugins/ai)** is the WordPress.org
+  reference implementation built on top of that SDK -- Connectors approvals, an
+  abilities explorer, AI request logging, and editor features. It *is* a real
+  plugin, and `.wp-env.json` installs it, because it is the thing that actually
+  exercises a registered provider end to end.
+
+Confirm what an environment has:
 
 ```bash
+npx @wordpress/env run cli wp plugin list
 npx @wordpress/env run cli wp eval 'echo WordPress\AiClient\AiClient::VERSION;'
 ```
 

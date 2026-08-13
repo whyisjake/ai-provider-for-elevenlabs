@@ -2,7 +2,8 @@
 	"$schema": "https://schemas.wp.org/trunk/wp-env.json",
 	"core": null,
 	"plugins": [
-		"."
+		".",
+		"https://downloads.wordpress.org/plugin/ai.zip"
 	],
 	"port": 8890,
 	"testsPort": 8891,
