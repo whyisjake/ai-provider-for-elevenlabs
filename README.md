@@ -16,6 +16,8 @@ The ElevenLabs name and logo are trademarks of ElevenLabs.
 
 - **Text-to-Speech** -- high-quality voice synthesis with many voices and models
 - **Automatic voice selection** -- a prompt works without configuring a voice ID first
+- **Long-form narration** -- text beyond the model's per-request limit is narrated across
+  several requests and returned as one audio file ([caveats](#long-form-narration))
 - **Sound Effects Generation** -- generate sound effects from text prompts
 - **Voice Directory** -- list and discover available voices, including cloned voices, cached per API key
 - Automatic provider registration in WordPress
@@ -154,6 +156,69 @@ $audio = AiClient::prompt( 'Hello, this is a test of ElevenLabs text to speech.'
 
 When `outputSpeechVoice` is omitted, the provider picks a voice from your account, preferring a
 premade one. The voice list is cached, so this costs one extra API call at most.
+
+### Long-form narration
+
+ElevenLabs caps the characters accepted in one request, and the cap depends on the
+model:
+
+| Model | Characters per request |
+|---|---|
+| `eleven_v3` | 5,000 |
+| `eleven_multilingual_v2` (default) | 10,000 |
+| `eleven_turbo_v2`, `eleven_flash_v2` | 30,000 |
+| `eleven_turbo_v2_5`, `eleven_flash_v2_5` | 40,000 |
+
+Longer text is split on paragraph and sentence boundaries, narrated in several
+requests that carry their neighbouring text so prosody survives the seams, and
+returned as a single audio file. Nothing changes for text that already fits: it
+still makes exactly one request.
+
+Two constraints are worth knowing before relying on this.
+
+**It is slow, and may exceed your PHP time limit.** Narration is not instant, and
+a long post is several sequential API calls inside one request. A measured
+example: **16,799 characters produced 18 MB of audio in 37 seconds**, against a
+PHP default `max_execution_time` of 30. Most of that is synthesis rather than
+chunking overhead, so a single near-limit request is already slow. For anything
+approaching post length, either raise `max_execution_time` and
+`WP_MEMORY_LIMIT`, or drive narration from WP-CLI or a background job rather than
+a page request. The audio is held in memory before being returned, so memory
+scales with the length of the output.
+
+**It costs one request per chunk.** A long post is charged accordingly.
+
+Chunking also requires an output format whose audio can be joined. MP3 and the raw
+PCM and µ-law formats can be; Opus is carried in an Ogg container and cannot, and
+AAC is excluded until confirmed to be ADTS-framed. Requesting an unjoinable format
+for over-long text fails immediately, before any request is billed, rather than
+returning audio that is subtly broken. Short text is unaffected in every format.
+
+### Provider-specific options
+
+The provider supports `customOptions`, which pass through to the ElevenLabs API.
+This covers parameters the AI Client has no dedicated option for:
+
+```php
+$audio = AiClient::prompt( 'Bonjour tout le monde.' )
+    ->usingProvider( 'elevenlabs' )
+    ->usingModelConfig( ModelConfig::fromArray( [
+        'customOptions' => [
+            'language_code'            => 'fr',   // force a language
+            'speed'                    => 1.1,    // a voice setting
+            'seed'                     => 42,     // deterministic output
+            'apply_text_normalization' => 'on',
+        ],
+    ] ) )
+    ->convertTextToSpeech();
+```
+
+Voice settings (`stability`, `similarity_boost`, `style`, `use_speaker_boost`,
+`speed`) are nested under `voice_settings` automatically; everything else is sent
+at the top level. An option that collides with a parameter the provider sets --
+`text`, `model_id`, `voice_settings` -- is rejected rather than silently
+overriding it. `previous_text` and `next_text` are reserved, because the provider
+sets them when narrating long text.
 
 ### Text-to-Speech with Custom Voice Settings
 

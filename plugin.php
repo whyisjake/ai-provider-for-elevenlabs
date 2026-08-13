@@ -6,7 +6,7 @@
  * Description: ElevenLabs text-to-speech provider for the WordPress AI Client.
  * Requires at least: 6.9
  * Requires PHP: 7.4
- * Version: 0.3.0
+ * Version: 0.4.0
  * Author: Jake Spurlock
  * Author URI: https://profiles.wordpress.org/whyisjake/
  * License: GPL-2.0-or-later
